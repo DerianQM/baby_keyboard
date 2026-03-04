@@ -1,5 +1,5 @@
 #!/bin/bash
-# Сборка BabyKeyboard2 для macOS
+# Сборка BabyKeyboard (v1, старый дизайн) и BabyKeyboard2 (v2, новый дизайн) для macOS
 # Запускать на Mac: bash build_macos.sh
 
 set -e
@@ -7,7 +7,17 @@ set -e
 echo "=== Установка зависимостей ==="
 pip3 install pygame pyobjc-framework-Quartz pyinstaller
 
-echo "=== Сборка приложения ==="
+echo ""
+echo "=== Сборка v1 (старый дизайн) → BabyKeyboard ==="
+python3 -m PyInstaller \
+    --onefile \
+    --noconsole \
+    --name "BabyKeyboard" \
+    --osx-bundle-identifier "com.babykeyboard.app" \
+    baby_keyboard_macos_v1.py
+
+echo ""
+echo "=== Сборка v2 (новый дизайн) → BabyKeyboard2 ==="
 python3 -m PyInstaller \
     --onefile \
     --noconsole \
@@ -17,7 +27,8 @@ python3 -m PyInstaller \
 
 echo ""
 echo "=== Готово! ==="
-echo "Исполняемый файл: dist/BabyKeyboard2"
+echo "  dist/BabyKeyboard   — старый дизайн (статичные пузырьки)"
+echo "  dist/BabyKeyboard2  — новый дизайн (Aero glass, интерактивные пузырьки)"
 echo ""
 echo "ВАЖНО: Перед запуском дайте разрешение в"
 echo "Системные настройки → Конфиденциальность → Универсальный доступ"
