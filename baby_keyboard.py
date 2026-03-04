@@ -1,8 +1,8 @@
 """
 Baby Keyboard — безопасная песочница для малыша.
-Полноэкранное приложение: нажатия клавиш показывают символы,
-движение мыши оставляет радужный шлейф.
-Закрытие только по Ctrl+Enter.
+Полноэкранное приложение: нажатия клавиш показывают символы поверх
+анимации пузырьков шампанского. Пузырьки плывут снизу вверх и лопаются
+при наведении мыши. Закрытие только по Ctrl+Enter.
 """
 
 import ctypes
@@ -11,6 +11,7 @@ import threading
 import time
 import random
 import colorsys
+import math
 import sys
 
 import pygame
@@ -28,10 +29,8 @@ VK_ESCAPE = 0x1B
 VK_F4 = 0x73
 VK_DELETE = 0x2E
 VK_RETURN = 0x0D
-VK_D = 0x44
 
 LLKHF_ALTDOWN = 0x20
-
 HWND_TOPMOST = -1
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
@@ -39,38 +38,23 @@ SWP_NOSIZE = 0x0001
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-# Настраиваем типы Win32 функций
 user32.SetWindowsHookExW.argtypes = [
-    ctypes.c_int,
-    ctypes.c_void_p,
-    wintypes.HINSTANCE,
-    wintypes.DWORD,
+    ctypes.c_int, ctypes.c_void_p, wintypes.HINSTANCE, wintypes.DWORD,
 ]
 user32.SetWindowsHookExW.restype = ctypes.c_void_p
-
 user32.CallNextHookEx.argtypes = [
-    ctypes.c_void_p,
-    ctypes.c_int,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
+    ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
 ]
 user32.CallNextHookEx.restype = ctypes.c_long
-
 user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
 user32.UnhookWindowsHookEx.restype = wintypes.BOOL
-
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
-
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
-# Тип callback для хука
 HOOKPROC = ctypes.CFUNCTYPE(
-    ctypes.c_long,
-    ctypes.c_int,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
+    ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
 )
 
 
@@ -91,9 +75,7 @@ ctrl_enter_pressed = False
 
 
 def _kb_hook_proc(nCode, wParam, lParam):
-    """Low-level keyboard hook: блокирует системные комбинации."""
     global ctrl_enter_pressed
-
     if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
         kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
         vk = kb.vkCode
@@ -101,47 +83,32 @@ def _kb_hook_proc(nCode, wParam, lParam):
         ctrl_down = bool(user32.GetAsyncKeyState(0xA2) & 0x8000) or bool(
             user32.GetAsyncKeyState(0xA3) & 0x8000
         )
-
-        # Ctrl+Enter — пропускаем (для закрытия)
         if ctrl_down and vk == VK_RETURN:
             ctrl_enter_pressed = True
             return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
-
-        # Блокируем Win
         if vk in (VK_LWIN, VK_RWIN):
             return 1
-
-        # Блокируем Alt+Tab, Alt+F4, Alt+Esc
         if alt_down and vk in (VK_TAB, VK_F4, VK_ESCAPE):
             return 1
-
-        # Блокируем Ctrl+Esc (меню Пуск)
         if ctrl_down and vk == VK_ESCAPE:
             return 1
-
-        # Блокируем Win+D (показать рабочий стол) — Win уже заблокирован,
-        # но на всякий случай
         if ctrl_down and alt_down and vk == VK_DELETE:
             return 1
-
     return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
 
 
-# Prevent garbage collection of the callback
 _hook_callback = HOOKPROC(_kb_hook_proc)
 
 
 def _hook_thread():
-    """Поток для установки хука и прокачки сообщений Windows."""
     global hook_id
     hook_id = user32.SetWindowsHookExW(
         WH_KEYBOARD_LL, _hook_callback, kernel32.GetModuleHandleW(None), 0
     )
     if not hook_id:
         err = ctypes.GetLastError()
-        print(f"WARN: не удалось установить хук клавиатуры (err={err})", file=sys.stderr)
+        print(f"WARN: хук не установлен (err={err})", file=sys.stderr)
         return
-
     msg = wintypes.MSG()
     while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
         user32.TranslateMessage(ctypes.byref(msg))
@@ -161,152 +128,430 @@ def stop_hook():
         hook_id = None
 
 
-# ─── Утилиты ───────────────────────────────────────────────────────
+# ─── Фон ───────────────────────────────────────────────────────────
+
+def create_background(W, H):
+    """
+    Рисует фон в стиле Telegram: мягкий градиент + цветные
+    акварельные пятна + лёгкая текстура из точек.
+    """
+    bg = pygame.Surface((W, H))
+
+    # Градиент сверху вниз: нежно-голубой → чуть теплее
+    top    = (168, 213, 245)
+    mid    = (185, 224, 248)
+    bottom = (205, 235, 252)
+    for y in range(H):
+        t = y / H
+        if t < 0.5:
+            f = t * 2
+            c = tuple(int(top[i] + (mid[i] - top[i]) * f) for i in range(3))
+        else:
+            f = (t - 0.5) * 2
+            c = tuple(int(mid[i] + (bottom[i] - mid[i]) * f) for i in range(3))
+        pygame.draw.line(bg, c, (0, y), (W, y))
+
+    # Мягкие акварельные пятна (как декоративные элементы Telegram)
+    blob_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+    blobs = [
+        (W * 0.08,  H * 0.12, 260, (140, 190, 230, 28)),
+        (W * 0.85,  H * 0.08, 220, (160, 205, 240, 24)),
+        (W * 0.55,  H * 0.35, 300, (150, 200, 238, 18)),
+        (W * 0.12,  H * 0.65, 240, (130, 185, 225, 22)),
+        (W * 0.92,  H * 0.60, 200, (155, 198, 235, 20)),
+        (W * 0.40,  H * 0.80, 280, (145, 195, 235, 18)),
+        (W * 0.72,  H * 0.88, 190, (165, 210, 242, 22)),
+        (W * 0.25,  H * 0.45, 170, (170, 215, 245, 16)),
+        (W * 0.65,  H * 0.18, 150, (155, 202, 238, 20)),
+    ]
+    for bx, by, br, col in blobs:
+        # Каждое пятно = несколько кругов нарастающей прозрачности от центра
+        for step in range(6, 0, -1):
+            t = step / 6
+            a = int(col[3] * (1 - t * 0.6))
+            r = int(br * t)
+            pygame.draw.circle(blob_surf, (col[0], col[1], col[2], a),
+                               (int(bx), int(by)), r)
+    bg.blit(blob_surf, (0, 0))
+
+    # Мелкие декоративные кружки-«пузырьки» на фоне (static)
+    dot_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+    for _ in range(220):
+        dx = random.randint(0, W)
+        dy = random.randint(0, H)
+        dr = random.choice([1, 1, 2, 2, 3])
+        da = random.randint(18, 55)
+        pygame.draw.circle(dot_surf, (255, 255, 255, da), (dx, dy), dr)
+    bg.blit(dot_surf, (0, 0))
+
+    return bg
 
 
-def random_bright_color():
-    """Случайный яркий насыщенный цвет."""
-    h = random.random()
-    r, g, b = colorsys.hsv_to_rgb(h, 0.9, 1.0)
-    return (int(r * 255), int(g * 255), int(b * 255))
+# ─── Пузырь — Aero Glass ───────────────────────────────────────────
 
+# Кэш поверхностей пузырей по размеру (ключ = int(radius))
+_bubble_surf_cache: dict = {}
+
+
+def _build_bubble_surf(r: int) -> pygame.Surface:
+    """
+    Рисует один пузырь в стиле Windows Aero:
+    почти прозрачное тело + стеклянный блик + яркая окантовка + блик-точка.
+    """
+    size = (r + 6) * 2
+    s = pygame.Surface((size, size), pygame.SRCALPHA)
+    cx = cy = r + 6
+
+    # 1. Тело — очень прозрачное, чуть голубоватое, чуть темнее к краю
+    for ring in range(r, 0, -max(1, r // 8)):
+        t = ring / r           # 1 у края, 0 в центре
+        a = int(8 + 22 * (t ** 1.5))
+        pygame.draw.circle(s, (190, 225, 255, a), (cx, cy), ring)
+
+    # 2. Внутреннее кольцо (утолщает стеклянность)
+    pygame.draw.circle(s, (220, 240, 255, 55), (cx, cy), max(1, r - 4), 1)
+
+    # 3. Внешняя окантовка — белая, яркая
+    pygame.draw.circle(s, (255, 255, 255, 210), (cx, cy), r, 3)
+
+    # 4. Большой стеклянный блик сверху (полумесяц)
+    #    Рисуем несколько вложенных эллипсов от края к центру с убыванием alpha
+    shine_w = int(r * 1.35)
+    shine_h = int(r * 0.60)
+    shine_y0 = cy - r + 5
+    steps = 8
+    for i in range(steps, 0, -1):
+        t = i / steps          # 1 снаружи, 0 внутри
+        ew = int(shine_w * math.sqrt(t))
+        eh = int(shine_h * t)
+        # alpha: максимум посередине дуги, ноль у краёв
+        a = int(165 * math.sin(t * math.pi))
+        if ew > 1 and eh > 1:
+            pygame.draw.ellipse(
+                s, (255, 255, 255, a),
+                (cx - ew // 2, shine_y0, ew, eh)
+            )
+
+    # 5. Яркая точка-блик (верхний левый квадрант)
+    hx = cx - r // 3
+    hy = cy - int(r * 0.52)
+    hr = max(2, r // 7)
+    pygame.draw.circle(s, (255, 255, 255, 245), (hx, hy), hr)
+    pygame.draw.circle(s, (255, 255, 255, 255), (hx, hy), max(1, hr // 2))
+
+    # 6. Нижний рефракционный блик (отражение снизу)
+    ref_w = int(r * 0.85)
+    ref_h = int(r * 0.28)
+    pygame.draw.ellipse(
+        s, (210, 235, 255, 45),
+        (cx - ref_w // 2, cy + int(r * 0.52), ref_w, ref_h)
+    )
+
+    return s
+
+
+def get_bubble_surf(r: int) -> pygame.Surface:
+    r = max(4, int(r))
+    if r not in _bubble_surf_cache:
+        _bubble_surf_cache[r] = _build_bubble_surf(r)
+    return _bubble_surf_cache[r]
+
+
+def draw_aero_bubble(surface, x, y, radius, alpha=255):
+    """Рисует Aero-пузырь. alpha=255 — полностью, 0 — прозрачный."""
+    surf = get_bubble_surf(int(radius))
+    if alpha < 255:
+        surf = surf.copy()
+        surf.set_alpha(alpha)
+    cx = int(x)
+    cy = int(y)
+    r = int(radius) + 6
+    surface.blit(surf, (cx - r, cy - r))
+
+
+# ─── Класс большого пузырька ───────────────────────────────────────
+
+class Bubble:
+    TARGET_COUNT = 18
+    SPEED_MIN = 40
+    SPEED_MAX = 70
+    RADIUS_MIN = 52
+    RADIUS_MAX = 95
+
+    def __init__(self, W, H, start_offscreen=True):
+        self.W = W
+        self.H = H
+        self._respawn(start_offscreen)
+
+    def _respawn(self, start_offscreen=True):
+        self.radius = random.uniform(self.RADIUS_MIN, self.RADIUS_MAX)
+        pad = self.radius + 15
+        self.x = random.uniform(pad, self.W - pad)
+        if start_offscreen:
+            self.y = self.H + self.radius + random.uniform(10, 200)
+        else:
+            self.y = random.uniform(self.H * 0.3, self.H - pad)
+        self.speed = random.uniform(self.SPEED_MIN, self.SPEED_MAX)
+        self.wobble_phase = random.uniform(0, math.pi * 2)
+        self.wobble_amp   = random.uniform(10, 25)
+        self.wobble_speed = random.uniform(0.6, 1.2)
+        self.alive = True
+        self.popping = False
+        self.pop_alpha = 255        # для fade-out при лопании
+        self.pop_particles = []
+        self.pop_timer = 0.0
+        self.reached_top = False
+
+    def update(self, dt, mx, my):
+        if self.popping:
+            self.pop_timer += dt
+            self.pop_alpha = max(0, int(255 * (1.0 - self.pop_timer / 0.5)))
+            for p in self.pop_particles:
+                p['x']  += p['vx'] * dt
+                p['y']  += p['vy'] * dt
+                p['vy'] -= 80 * dt      # частицы всплывают
+                p['vx'] *= 0.96
+                p['life'] -= dt
+            self.pop_particles = [p for p in self.pop_particles if p['life'] > 0]
+            if self.pop_timer > 0.9:
+                self.alive = False
+            return
+
+        self.y -= self.speed * dt
+        self.wobble_phase += self.wobble_speed * dt
+        self.x += math.sin(self.wobble_phase) * self.wobble_amp * dt
+        self.x = max(self.radius + 10, min(self.W - self.radius - 10, self.x))
+
+        dist = math.hypot(mx - self.x, my - self.y)
+        if dist < self.radius + 8:
+            self.pop()
+
+        if self.y + self.radius < -10:
+            self.reached_top = True
+            self.alive = False
+
+    def pop(self):
+        self.popping = True
+        n = random.randint(12, 20)
+        for _ in range(n):
+            angle = random.uniform(0, math.pi * 2)
+            spd   = random.uniform(80, 220)
+            life  = random.uniform(0.3, 0.75)
+            r_part = random.uniform(4, self.radius * 0.28)
+            self.pop_particles.append({
+                'x': self.x + random.uniform(-self.radius * 0.4, self.radius * 0.4),
+                'y': self.y + random.uniform(-self.radius * 0.4, self.radius * 0.4),
+                'vx': math.cos(angle) * spd,
+                'vy': math.sin(angle) * spd - 140,
+                'r': r_part,
+                'life': life,
+                'max_life': life,
+            })
+
+    def draw(self, surface):
+        if self.popping:
+            # Основной пузырь тает
+            if self.pop_alpha > 0:
+                draw_aero_bubble(surface, self.x, self.y, self.radius, self.pop_alpha)
+            # Летящие осколки-мини-пузырьки
+            for p in self.pop_particles:
+                a = int(230 * (p['life'] / p['max_life']))
+                draw_aero_bubble(surface, p['x'], p['y'], max(3, p['r']), a)
+            return
+        draw_aero_bubble(surface, self.x, self.y, self.radius)
+
+
+# ─── Шипение шампанского (верхняя зона) ───────────────────────────
+
+class FizzSystem:
+    ZONE_H     = 90
+    SPAWN_RATE = 0.022
+
+    def __init__(self, W, H):
+        self.W = W
+        self.H = H
+        self.particles = []
+        self._timer = 0.0
+
+    def spawn_burst(self, x, n=14):
+        for _ in range(n):
+            self.particles.append(self._make(
+                x=x + random.uniform(-40, 40),
+                y=random.uniform(0, self.ZONE_H),
+            ))
+
+    def _make(self, x=None, y=None):
+        if x is None:
+            x = random.uniform(0, self.W)
+        if y is None:
+            y = random.uniform(0, self.ZONE_H)
+        life = random.uniform(0.5, 1.4)
+        return {
+            'x': x, 'y': y,
+            'vx': random.uniform(-10, 10),
+            'vy': random.uniform(-30, -8),
+            'r':  random.uniform(2, 6),
+            'life': life, 'max_life': life,
+        }
+
+    def update(self, dt):
+        self._timer += dt
+        while self._timer >= self.SPAWN_RATE:
+            self._timer -= self.SPAWN_RATE
+            for _ in range(random.randint(2, 4)):
+                self.particles.append(self._make())
+        for p in self.particles:
+            p['x'] += p['vx'] * dt
+            p['y'] += p['vy'] * dt
+            p['life'] -= dt
+        self.particles = [p for p in self.particles if p['life'] > 0]
+
+    def draw(self, surface):
+        for p in self.particles:
+            a = int(210 * (p['life'] / p['max_life']))
+            draw_aero_bubble(surface, p['x'], p['y'], max(2, int(p['r'])), a)
+
+
+# ─── Главное приложение ────────────────────────────────────────────
 
 def hue_to_rgb(hue):
     r, g, b = colorsys.hsv_to_rgb(hue % 1.0, 1.0, 1.0)
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
-# ─── Главное приложение ────────────────────────────────────────────
-
-
 def main():
     global ctrl_enter_pressed
 
-    # Запускаем хук в отдельном потоке
     start_hook()
-    time.sleep(0.1)  # дать хуку время установиться
+    time.sleep(0.1)
 
-    # Инициализация Pygame
     pygame.init()
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.NOFRAME)
     pygame.display.set_caption("Baby Keyboard")
     W, H = screen.get_size()
 
-    # Делаем окно TOPMOST
     hwnd = pygame.display.get_wm_info()["window"]
     user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
 
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Arial", 96, bold=True)
+    font  = pygame.font.SysFont("Arial", 96, bold=True)
 
-    # Цвета
-    BG_COLOR = (200, 228, 246)  # нежно-голубой фон
-    CHAR_COLOR = (60, 60, 80)   # мягкий тёмно-серый для букв
+    # Предрисуем фон один раз
+    background = create_background(W, H)
 
-    # Декоративные пузырьки на фоне
-    bubbles = []
-    for _ in range(30):
-        bx = random.randint(0, W)
-        by = random.randint(0, H)
-        br = random.randint(20, 80)
-        ba = random.randint(30, 80)  # прозрачность
-        bubbles.append((bx, by, br, ba))
+    # Прогреваем кэш пузырей заранее (чтобы не лагало при первом появлении)
+    for r in range(Bubble.RADIUS_MIN, Bubble.RADIUS_MAX + 1, 4):
+        get_bubble_surf(r)
 
-    # Состояние символов
-    chars = []  # [(surface, x, y), ...]
-    cursor_x = 20
-    cursor_y = 20
-    line_height = 110
+    # Поверхность для динамики (per-pixel alpha)
+    dyn_surf  = pygame.Surface((W, H), pygame.SRCALPHA)
+    trail_surf = pygame.Surface((W, H), pygame.SRCALPHA)
 
     # Шлейф мыши
-    trail = []  # [(x, y, r, g, b, timestamp), ...]
-    TRAIL_LIFETIME = 2.0  # секунды
+    trail = []
+    TRAIL_LIFETIME = 2.0
     trail_hue = 0.0
 
-    # Создаём off-screen surface для шлейфа и пузырьков с per-pixel alpha
-    trail_surface = pygame.Surface((W, H), pygame.SRCALPHA)
-    bubble_surface = pygame.Surface((W, H), pygame.SRCALPHA)
+    # Пузыри — стартуем уже на экране
+    # При старте разбрасываем пузыри по всей высоте экрана
+    bubbles = [Bubble(W, H, start_offscreen=False) for _ in range(Bubble.TARGET_COUNT)]
+    for i, b in enumerate(bubbles):
+        b.y = random.uniform(b.radius + 10, H - b.radius - 10)
+
+    # Шипение
+    fizz = FizzSystem(W, H)
+
+    # Текст
+    chars = []
+    cursor_x, cursor_y = 20, 20
+    line_height = 115
 
     running = True
 
     while running:
         now = time.time()
-        dt = clock.get_time() / 1000.0
+        dt  = min(clock.get_time() / 1000.0, 0.05)
+        mx, my = pygame.mouse.get_pos()
 
         # ─── События ───
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                # Блокируем стандартное закрытие
                 pass
-
             elif event.type == pygame.KEYDOWN:
                 mods = pygame.key.get_mods()
-                # Ctrl+Enter — выход
                 if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_RETURN:
                     running = False
                     break
-
-                # Печатный символ
                 if event.unicode and event.unicode.isprintable():
-                    surf = font.render(event.unicode, True, CHAR_COLOR)
-                    # Проверяем перенос строки
+                    surf = font.render(event.unicode, True, (35, 45, 80))
                     if cursor_x + surf.get_width() > W - 20:
                         cursor_x = 20
                         cursor_y += line_height
-                    # Проверяем заполнение экрана
                     if cursor_y + line_height > H:
                         chars.clear()
                         cursor_x = 20
                         cursor_y = 20
                     chars.append((surf, cursor_x, cursor_y))
                     cursor_x += surf.get_width() + 5
-
             elif event.type == pygame.MOUSEMOTION:
-                mx, my = event.pos
                 trail_hue += 0.002
-                color = hue_to_rgb(trail_hue)
-                trail.append((mx, my, color[0], color[1], color[2], now))
+                trail.append((event.pos[0], event.pos[1], hue_to_rgb(trail_hue), now))
 
-        # Проверяем флаг от хука
         if ctrl_enter_pressed:
             running = False
 
-        # ─── Обновление шлейфа ───
-        # Удаляем старые точки
+        # ─── Обновление ───
+        for b in bubbles:
+            b.update(dt, mx, my)
+
+        alive_next = []
+        for b in bubbles:
+            if b.reached_top:
+                fizz.spawn_burst(b.x)
+            if b.alive:
+                alive_next.append(b)
+        bubbles = alive_next
+
+        while len(bubbles) < Bubble.TARGET_COUNT:
+            bubbles.append(Bubble(W, H, start_offscreen=True))
+
+        fizz.update(dt)
+
         cutoff = now - TRAIL_LIFETIME
-        while trail and trail[0][5] < cutoff:
+        while trail and trail[0][3] < cutoff:
             trail.pop(0)
 
         # ─── Отрисовка ───
-        screen.fill(BG_COLOR)
 
-        # Пузырьки
-        bubble_surface.fill((0, 0, 0, 0))
-        for bx, by, br, ba in bubbles:
-            pygame.draw.circle(bubble_surface, (255, 255, 255, ba), (bx, by), br)
-            pygame.draw.circle(bubble_surface, (255, 255, 255, ba + 20), (bx, by), br, 2)
-        screen.blit(bubble_surface, (0, 0))
+        # 1. Статичный фон
+        screen.blit(background, (0, 0))
 
-        # Символы
+        # 2. Пузыри + шипение
+        dyn_surf.fill((0, 0, 0, 0))
+        for b in bubbles:
+            b.draw(dyn_surf)
+        fizz.draw(dyn_surf)
+        screen.blit(dyn_surf, (0, 0))
+
+        # 3. Шлейф мыши
+        trail_surf.fill((0, 0, 0, 0))
+        for i in range(1, len(trail)):
+            x0, y0, c0, ts0 = trail[i - 1]
+            x1, y1, c1, ts1 = trail[i]
+            age   = now - ts1
+            alpha = max(0, int(255 * (1.0 - age / TRAIL_LIFETIME)))
+            width = max(2, int(10 * (1.0 - age / TRAIL_LIFETIME)))
+            if alpha > 0:
+                pygame.draw.line(trail_surf, (*c1, alpha), (x0, y0), (x1, y1), width)
+        screen.blit(trail_surf, (0, 0))
+
+        # 4. Текст поверх всего
         for surf, x, y in chars:
             screen.blit(surf, (x, y))
-
-        # Шлейф мыши — линия из сегментов
-        trail_surface.fill((0, 0, 0, 0))
-        for i in range(1, len(trail)):
-            x0, y0, r0, g0, b0, ts0 = trail[i - 1]
-            x1, y1, r1, g1, b1, ts1 = trail[i]
-            age = now - ts1
-            alpha = max(0, int(255 * (1.0 - age / TRAIL_LIFETIME)))
-            width = max(2, int(8 * (1.0 - age / TRAIL_LIFETIME)))
-            if alpha > 0:
-                pygame.draw.line(trail_surface, (r1, g1, b1, alpha), (x0, y0), (x1, y1), width)
-        screen.blit(trail_surface, (0, 0))
 
         pygame.display.flip()
         clock.tick(60)
 
-    # ─── Завершение ───
     stop_hook()
     pygame.quit()
 

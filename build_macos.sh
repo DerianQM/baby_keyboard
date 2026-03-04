@@ -1,5 +1,5 @@
 #!/bin/bash
-# Сборка BabyKeyboard для macOS
+# Сборка BabyKeyboard2 для macOS
 # Запускать на Mac: bash build_macos.sh
 
 set -e
@@ -11,13 +11,13 @@ echo "=== Сборка приложения ==="
 python3 -m PyInstaller \
     --onefile \
     --noconsole \
-    --name "BabyKeyboard" \
-    --osx-bundle-identifier "com.babykeyboard.app" \
+    --name "BabyKeyboard2" \
+    --osx-bundle-identifier "com.babykeyboard2.app" \
     baby_keyboard_macos.py
 
 echo ""
 echo "=== Готово! ==="
-echo "Исполняемый файл: dist/BabyKeyboard"
+echo "Исполняемый файл: dist/BabyKeyboard2"
 echo ""
 echo "ВАЖНО: Перед запуском дайте разрешение в"
 echo "Системные настройки → Конфиденциальность → Универсальный доступ"
