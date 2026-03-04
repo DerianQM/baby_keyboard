@@ -1,4 +1,4 @@
-# BabyKeyboard 2
+# BabyKeyboard
 
 Безопасная полноэкранная песочница для малышей. Ребёнок может нажимать любые клавиши и водить мышкой — приложение показывает символы поверх живой анимации пузырьков шампанского. Выйти из программы случайно невозможно.
 
@@ -9,69 +9,200 @@
 - **Шипение** — в верхней части экрана постоянно появляется шипение, как у шампанского; вспышка шипения происходит каждый раз, когда пузырь достигает верха
 - **Шлейф мыши** — движение мышки оставляет радужный светящийся след
 - **Текст** — любые нажатые клавиши отображаются крупными буквами поверх всей анимации
-- **Фон** — мягкий голубой градиент с акварельными пятнами, как в Telegram
+- **Фон** — мягкий голубой градиент с акварельными пятнами
 
 ## Как выйти
 
-**Ctrl + Enter** — единственный способ закрыть программу. Все остальные системные комбинации заблокированы:
+**Ctrl + G + Enter** — единственный способ закрыть программу (удерживайте Ctrl и G, затем нажмите Enter). Все остальные системные комбинации заблокированы:
 
 | Заблокировано | Причина |
 |---|---|
 | Win / Cmd+Tab | Переключение приложений |
 | Alt+F4 / Cmd+Q | Закрытие приложения |
 | Ctrl+Esc / Cmd+Space | Меню пуск / Spotlight |
-| Cmd+H, Cmd+M | Скрыть / свернуть |
+| Cmd+W, Cmd+H, Cmd+M | Закрыть / скрыть / свернуть окно |
 | Cmd+Alt+Esc | Force Quit |
 
-## Установка и запуск
+---
+
+## Установка и запуск — Windows
+
+### Требования
+
+- Windows 10 / 11
+- [Python 3.9+](https://www.python.org/downloads/) — при установке обязательно поставьте галочку **"Add Python to PATH"**
+
+### Шаг 1 — Установите Python
+
+1. Перейдите на [python.org/downloads](https://www.python.org/downloads/) и скачайте последнюю версию Python 3
+2. Запустите установщик
+3. **Важно:** на первом экране поставьте галочку **Add Python 3.x to PATH**
+4. Нажмите «Install Now»
+5. Проверьте установку — откройте командную строку (`Win+R` → `cmd`) и выполните:
+   ```
+   python --version
+   ```
+   Должно появиться что-то вроде `Python 3.11.4`
+
+### Шаг 2 — Скачайте проект
+
+**Вариант А — через Git:**
+```bat
+git clone https://github.com/mykolapodpriatov/baby_keyboard.git
+cd baby_keyboard
+```
+
+**Вариант Б — вручную:**
+1. Нажмите зелёную кнопку **Code → Download ZIP** на странице репозитория
+2. Распакуйте архив в удобную папку
+3. Откройте командную строку и перейдите в эту папку:
+   ```bat
+   cd C:\Users\ВашеИмя\Downloads\baby_keyboard
+   ```
+
+### Шаг 3 — Установите зависимости
+
+```bat
+pip install pygame
+```
+
+### Шаг 4 — Запустите программу
+
+```bat
+python baby_keyboard.py
+```
+
+Программа откроется в полноэкранном режиме. Для выхода нажмите **Ctrl + G + Enter**.
+
+---
+
+### Сборка .exe (не требует Python на компьютере)
+
+Если хотите запускать программу на компьютере без установленного Python — соберите единый исполняемый файл:
+
+```bat
+pip install pyinstaller
+build_windows.bat
+```
+
+Готовый файл появится в папке `dist\BabyKeyboard2.exe`. Его можно скопировать на любой компьютер с Windows и запускать двойным щелчком — Python не нужен.
+
+---
+
+## Установка и запуск — macOS
+
+### Требования
+
+- macOS 10.15 Catalina и новее
+- Python 3.9+ (рекомендуется установить через [Homebrew](https://brew.sh))
+
+### Шаг 1 — Установите Python
+
+**Рекомендуемый способ — через Homebrew:**
+
+1. Откройте **Terminal** (`Cmd+Space` → Terminal)
+2. Установите Homebrew (если ещё не установлен):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+3. Установите Python:
+   ```bash
+   brew install python
+   ```
+4. Проверьте установку:
+   ```bash
+   python3 --version
+   ```
+
+**Альтернативный способ — с официального сайта:**
+1. Скачайте установщик с [python.org/downloads](https://www.python.org/downloads/)
+2. Запустите `.pkg`-файл и следуйте инструкциям
+
+### Шаг 2 — Скачайте проект
+
+**Вариант А — через Git:**
+```bash
+git clone https://github.com/mykolapodpriatov/baby_keyboard.git
+cd baby_keyboard
+```
+
+**Вариант Б — вручную:**
+1. Нажмите зелёную кнопку **Code → Download ZIP** на странице репозитория
+2. Распакуйте архив
+3. Откройте Terminal и перейдите в папку проекта:
+   ```bash
+   cd ~/Downloads/baby_keyboard
+   ```
+
+### Шаг 3 — Установите зависимости
+
+```bash
+pip3 install pygame pyobjc-framework-Quartz
+```
+
+> Установка `pyobjc-framework-Quartz` может занять несколько минут — это нормально.
+
+### Шаг 4 — Дайте разрешение на управление вводом
+
+Программа блокирует системные комбинации клавиш через CGEventTap — для этого нужны права **Универсального доступа**:
+
+1. Откройте **Системные настройки** (System Settings)
+2. Перейдите в **Конфиденциальность и безопасность → Универсальный доступ** (Privacy & Security → Accessibility)
+3. Нажмите на замок внизу и введите пароль
+4. Нажмите `+` и добавьте **Terminal** (или ваш терминал: iTerm2 и т.д.)
+
+> Без этого разрешения программа запустится, но системные клавиши (Cmd+Tab и др.) не будут заблокированы.
+
+### Шаг 5 — Запустите программу
+
+```bash
+python3 baby_keyboard_macos.py
+```
+
+Программа откроется в полноэкранном режиме. Для выхода нажмите **Ctrl + G + Enter**.
+
+---
+
+### Сборка бинарного файла (не требует Python на компьютере)
+
+```bash
+pip3 install pyinstaller
+bash build_macos.sh
+```
+
+Готовый файл появится в `dist/BabyKeyboard2`. Его можно запускать двойным щелчком — Python не нужен.
+
+> **Gatekeeper:** При первом запуске macOS может заблокировать файл. Откройте **Системные настройки → Конфиденциальность и безопасность** и нажмите **"Всё равно открыть"**.
+
+---
+
+## Тесты
 
 ### Windows
 
-```bash
-pip install pygame
-python baby_keyboard.py
+```bat
+pip install pytest
+python -m pytest test_baby_keyboard.py -v
 ```
 
 ### macOS
 
 ```bash
-pip3 install pygame pyobjc-framework-Quartz
-python3 baby_keyboard_macos.py
+pip3 install pytest
+python3 -m pytest test_baby_keyboard_macos.py -v
 ```
 
-> **macOS**: После запуска дайте разрешение в
-> *Системные настройки → Конфиденциальность → Универсальный доступ*
-
-## Сборка исполняемых файлов
-
-### Windows → `BabyKeyboard2.exe`
-
-```bat
-build_windows.bat
-```
-
-Результат: `dist\BabyKeyboard2.exe` — один файл, без установки Python.
-
-### macOS → `BabyKeyboard2`
+### Обе платформы одной командой
 
 ```bash
-bash build_macos.sh
-```
-
-Результат: `dist/BabyKeyboard2` — один файл, без установки Python.
-
-## Тесты
-
-```bash
-pip install pytest
-python -m pytest test_baby_keyboard.py -v
+python -m pytest test_baby_keyboard.py test_baby_keyboard_macos.py -v
 ```
 
 Покрытие тестов:
 
 | Класс тестов | Что проверяется |
 |---|---|
-| `TestCtrlEnterExit` | Выход **только** по Ctrl+Enter; Escape/Enter/Alt+F4 не закрывают; логика хука |
+| `TestCtrlGEnterExit` | Выход **только** по Ctrl+G+Enter; Ctrl+Enter без G не закрывает; логика хука |
 | `TestBubbleLifecycle` | Движение вверх, лопание по наведению, смерть за верхним краем, частицы, границы |
 | `TestFizzSystem` | Spawn частиц, удаление мёртвых, burst, направление вверх |
 | `TestBubbleCache` | Кэш возвращает одинаковый объект для одного радиуса, per-pixel alpha |
@@ -79,15 +210,18 @@ python -m pytest test_baby_keyboard.py -v
 | `TestDrawing` | Отрисовка не падает при любых параметрах |
 | `TestStability` | 10 сек симуляция @ 60 fps, dt-spike, нет утечки памяти |
 
+---
+
 ## Файлы проекта
 
 ```
 baby_keyboard/
-├── baby_keyboard.py         — Windows-версия
-├── baby_keyboard_macos.py   — macOS-версия
-├── test_baby_keyboard.py    — тесты (Windows)
-├── build_windows.bat        — сборка BabyKeyboard2.exe
-├── build_macos.sh           — сборка BabyKeyboard2 (macOS)
+├── baby_keyboard.py              — Windows-версия
+├── baby_keyboard_macos.py        — macOS-версия
+├── test_baby_keyboard.py         — тесты (Windows)
+├── test_baby_keyboard_macos.py   — тесты (macOS)
+├── build_windows.bat             — сборка BabyKeyboard2.exe
+├── build_macos.sh                — сборка BabyKeyboard2 (macOS бинарник)
 └── README.md
 ```
 
@@ -95,6 +229,8 @@ baby_keyboard/
 
 - **Python 3.9+**
 - **pygame** — графика и события
-- **ctypes / Win32** (Windows) — low-level keyboard hook, блокировка системных клавиш
-- **pyobjc-framework-Quartz** (macOS) — CGEventTap, блокировка системных клавиш
+- **ctypes / Win32** (Windows) — низкоуровневый `WH_KEYBOARD_LL` хук, блокировка системных клавиш
+- **pyobjc-framework-Quartz** (macOS) — `CGEventTap`, блокировка системных клавиш
+- **threading.Event** — синхронизация запуска хука без busy-wait
+- **collections.deque** — O(1) очередь для шлейфа мыши
 - **PyInstaller** — сборка в один исполняемый файл

@@ -2,7 +2,7 @@
 Baby Keyboard (macOS) — безопасная песочница для малыша.
 Полноэкранное приложение: нажатия клавиш показывают символы поверх
 анимации пузырьков шампанского. Пузырьки плывут снизу вверх и лопаются
-при наведении мыши. Закрытие только по Ctrl+Enter.
+при наведении мыши. Закрытие только по Ctrl+G+Enter.
 
 Требования: pip install pygame pyobjc-framework-Quartz
 """
@@ -13,6 +13,7 @@ import random
 import colorsys
 import math
 import sys
+from collections import deque
 
 import pygame
 
@@ -53,6 +54,7 @@ KC_Q      = 12
 KC_W      = 13
 KC_H      = 4
 KC_M      = 46
+KC_G      = 5
 KC_SPACE  = 49
 KC_F4     = 118
 KC_ESCAPE = 53
@@ -61,11 +63,13 @@ KC_RETURN = 36
 # ─── Глобальное состояние ──────────────────────────────────────────
 
 ctrl_enter_pressed = False
-_run_loop_ref = None
+_run_loop_ref      = None
+_hook_ready        = threading.Event()
+_g_key_down        = False  # отслеживаем зажатую G в CGEventTap
 
 
 def _event_tap_callback(proxy, event_type, event, refcon):
-    global ctrl_enter_pressed
+    global ctrl_enter_pressed, _g_key_down
     if event_type not in (kCGEventKeyDown, kCGEventKeyUp, kCGEventFlagsChanged):
         return event
     keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
@@ -74,8 +78,16 @@ def _event_tap_callback(proxy, event_type, event, refcon):
     ctrl = bool(flags & kCGEventFlagMaskControl)
     alt  = bool(flags & kCGEventFlagMaskAlternate)
 
+    # Отслеживаем состояние G
+    if keycode == KC_G:
+        if event_type == kCGEventKeyDown:
+            _g_key_down = True
+        elif event_type == kCGEventKeyUp:
+            _g_key_down = False
+
     if ctrl and keycode == KC_RETURN and event_type == kCGEventKeyDown:
-        ctrl_enter_pressed = True
+        if _g_key_down:
+            ctrl_enter_pressed = True
         return event
 
     if cmd and keycode in (KC_TAB, KC_Q, KC_W, KC_H, KC_M, KC_SPACE, KC_F4):
@@ -89,10 +101,11 @@ def _event_tap_callback(proxy, event_type, event, refcon):
 def _tap_thread():
     global _run_loop_ref
     if not HAS_QUARTZ:
+        _hook_ready.set()
         return
     event_mask = (
         (1 << kCGEventKeyDown) |
-        (1 << kCGEventKeyUp) |
+        (1 << kCGEventKeyUp)   |
         (1 << kCGEventFlagsChanged)
     )
     tap = CGEventTapCreate(
@@ -103,17 +116,21 @@ def _tap_thread():
         print("WARN: не удалось создать CGEventTap. "
               "Системные настройки → Конфиденциальность → Универсальный доступ",
               file=sys.stderr)
+        _hook_ready.set()
         return
-    source = CFMachPortCreateRunLoopSource(None, tap, 0)
+    source       = CFMachPortCreateRunLoopSource(None, tap, 0)
     _run_loop_ref = CFRunLoopGetCurrent()
     CFRunLoopAddSource(_run_loop_ref, source, kCFRunLoopCommonModes)
     CGEventTapEnable(tap, True)
+    _hook_ready.set()
     CFRunLoopRun()
 
 
 def start_hook():
+    _hook_ready.clear()
     t = threading.Thread(target=_tap_thread, daemon=True)
     t.start()
+    _hook_ready.wait(timeout=1.0)
     return t
 
 
@@ -200,14 +217,14 @@ def _build_bubble_surf(r: int) -> pygame.Surface:
     pygame.draw.circle(s, (220, 240, 255, 55), (cx, cy), max(1, r - 4), 1)
     pygame.draw.circle(s, (255, 255, 255, 210), (cx, cy), r, 3)
 
-    shine_w = int(r * 1.35)
-    shine_h = int(r * 0.60)
+    shine_w  = int(r * 1.35)
+    shine_h  = int(r * 0.60)
     shine_y0 = cy - r + 5
     for i in range(8, 0, -1):
-        t = i / 8
+        t  = i / 8
         ew = int(shine_w * math.sqrt(t))
         eh = int(shine_h * t)
-        a = int(165 * math.sin(t * math.pi))
+        a  = int(165 * math.sin(t * math.pi))
         if ew > 1 and eh > 1:
             pygame.draw.ellipse(s, (255, 255, 255, a),
                                 (cx - ew // 2, shine_y0, ew, eh))
@@ -245,10 +262,10 @@ def draw_aero_bubble(surface, x, y, radius, alpha=255):
 
 class Bubble:
     TARGET_COUNT = 18
-    SPEED_MIN = 40
-    SPEED_MAX = 70
-    RADIUS_MIN = 52
-    RADIUS_MAX = 95
+    SPEED_MIN    = 40
+    SPEED_MAX    = 70
+    RADIUS_MIN   = 52
+    RADIUS_MAX   = 95
 
     def __init__(self, W, H, start_offscreen=True):
         self.W = W
@@ -256,64 +273,65 @@ class Bubble:
         self._respawn(start_offscreen)
 
     def _respawn(self, start_offscreen=True):
-        self.radius = random.uniform(self.RADIUS_MIN, self.RADIUS_MAX)
-        pad = self.radius + 15
-        self.x = random.uniform(pad, self.W - pad)
+        self.radius       = random.uniform(self.RADIUS_MIN, self.RADIUS_MAX)
+        pad               = self.radius + 15
+        self.x            = random.uniform(pad, self.W - pad)
         if start_offscreen:
             self.y = self.H + self.radius + random.uniform(10, 200)
         else:
             self.y = random.uniform(self.H * 0.3, self.H - pad)
-        self.speed = random.uniform(self.SPEED_MIN, self.SPEED_MAX)
+        self.speed        = random.uniform(self.SPEED_MIN, self.SPEED_MAX)
         self.wobble_phase = random.uniform(0, math.pi * 2)
         self.wobble_amp   = random.uniform(10, 25)
         self.wobble_speed = random.uniform(0.6, 1.2)
-        self.alive = True
-        self.popping = False
-        self.pop_alpha = 255
+        self.alive        = True
+        self.popping      = False
+        self.pop_alpha    = 255
         self.pop_particles = []
-        self.pop_timer = 0.0
-        self.reached_top = False
+        self.pop_timer    = 0.0
+        self.reached_top  = False
 
     def update(self, dt, mx, my):
         if self.popping:
             self.pop_timer += dt
-            self.pop_alpha = max(0, int(255 * (1.0 - self.pop_timer / 0.5)))
+            self.pop_alpha  = max(0, int(255 * (1.0 - self.pop_timer / 0.5)))
             for p in self.pop_particles:
-                p['x']  += p['vx'] * dt
-                p['y']  += p['vy'] * dt
-                p['vy'] -= 80 * dt
-                p['vx'] *= 0.96
+                p['x']    += p['vx'] * dt
+                p['y']    += p['vy'] * dt
+                p['vy']   -= 80 * dt
+                p['vx']   *= 0.96
                 p['life'] -= dt
             self.pop_particles = [p for p in self.pop_particles if p['life'] > 0]
             if self.pop_timer > 0.9:
                 self.alive = False
             return
 
-        self.y -= self.speed * dt
+        self.y            -= self.speed * dt
         self.wobble_phase += self.wobble_speed * dt
-        self.x += math.sin(self.wobble_phase) * self.wobble_amp * dt
-        self.x = max(self.radius + 10, min(self.W - self.radius - 10, self.x))
+        self.x            += math.sin(self.wobble_phase) * self.wobble_amp * dt
+        self.x             = max(self.radius + 10, min(self.W - self.radius - 10, self.x))
 
         if math.hypot(mx - self.x, my - self.y) < self.radius + 8:
             self.pop()
 
         if self.y + self.radius < -10:
             self.reached_top = True
-            self.alive = False
+            self.alive       = False
 
     def pop(self):
         self.popping = True
         for _ in range(random.randint(12, 20)):
-            angle = random.uniform(0, math.pi * 2)
-            spd   = random.uniform(80, 220)
-            life  = random.uniform(0.3, 0.75)
+            angle  = random.uniform(0, math.pi * 2)
+            spd    = random.uniform(80, 220)
+            life   = random.uniform(0.3, 0.75)
             self.pop_particles.append({
-                'x': self.x + random.uniform(-self.radius * 0.4, self.radius * 0.4),
-                'y': self.y + random.uniform(-self.radius * 0.4, self.radius * 0.4),
-                'vx': math.cos(angle) * spd,
-                'vy': math.sin(angle) * spd - 140,
-                'r': random.uniform(4, self.radius * 0.28),
-                'life': life, 'max_life': life,
+                'x':        self.x + random.uniform(-self.radius * 0.4, self.radius * 0.4),
+                'y':        self.y + random.uniform(-self.radius * 0.4, self.radius * 0.4),
+                'vx':       math.cos(angle) * spd,
+                'vy':       math.sin(angle) * spd - 140,
+                'r':        random.uniform(4, self.radius * 0.28),
+                'life':     life,
+                'max_life': life,
             })
 
     def draw(self, surface):
@@ -334,10 +352,10 @@ class FizzSystem:
     SPAWN_RATE = 0.022
 
     def __init__(self, W, H):
-        self.W = W
-        self.H = H
+        self.W         = W
+        self.H         = H
         self.particles = []
-        self._timer = 0.0
+        self._timer    = 0.0
 
     def spawn_burst(self, x, n=14):
         for _ in range(n):
@@ -367,8 +385,8 @@ class FizzSystem:
             for _ in range(random.randint(2, 4)):
                 self.particles.append(self._make())
         for p in self.particles:
-            p['x'] += p['vx'] * dt
-            p['y'] += p['vy'] * dt
+            p['x']    += p['vx'] * dt
+            p['y']    += p['vy'] * dt
             p['life'] -= dt
         self.particles = [p for p in self.particles if p['life'] > 0]
 
@@ -383,8 +401,7 @@ class FizzSystem:
 def main():
     global ctrl_enter_pressed
 
-    start_hook()
-    time.sleep(0.2)
+    start_hook()  # блокируется до готовности CGEventTap (threading.Event)
 
     pygame.init()
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.NOFRAME)
@@ -402,9 +419,9 @@ def main():
     dyn_surf   = pygame.Surface((W, H), pygame.SRCALPHA)
     trail_surf = pygame.Surface((W, H), pygame.SRCALPHA)
 
-    trail = []
+    trail          = deque()
     TRAIL_LIFETIME = 2.0
-    trail_hue = 0.0
+    trail_hue      = 0.0
 
     bubbles = [Bubble(W, H, start_offscreen=False) for _ in range(Bubble.TARGET_COUNT)]
     for b in bubbles:
@@ -412,29 +429,33 @@ def main():
 
     fizz = FizzSystem(W, H)
 
-    chars = []
-    cursor_x, cursor_y = 20, 20
+    chars       = []
+    cursor_x    = 20
+    cursor_y    = 20
     line_height = 115
-
-    running = True
+    g_held      = False  # отслеживаем, зажата ли клавиша G
+    running     = True
 
     while running:
-        now = time.time()
-        dt  = min(clock.get_time() / 1000.0, 0.05)
+        now    = time.time()
+        dt     = min(clock.get_time() / 1000.0, 0.05)
         mx, my = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pass
             elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_g:
+                    g_held = True
                 mods = pygame.key.get_mods()
                 if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_RETURN:
-                    running = False
-                    break
+                    if g_held:
+                        running = False
+                        break
                 if event.unicode and event.unicode.isprintable():
                     surf = font.render(event.unicode, True, (35, 45, 80))
                     if cursor_x + surf.get_width() > W - 20:
-                        cursor_x = 20
+                        cursor_x  = 20
                         cursor_y += line_height
                     if cursor_y + line_height > H:
                         chars.clear()
@@ -442,6 +463,9 @@ def main():
                         cursor_y = 20
                     chars.append((surf, cursor_x, cursor_y))
                     cursor_x += surf.get_width() + 5
+            elif event.type == pygame.KEYUP:
+                if event.key == pygame.K_g:
+                    g_held = False
             elif event.type == pygame.MOUSEMOTION:
                 trail_hue += 0.002
                 trail.append((event.pos[0], event.pos[1], hue_to_rgb(trail_hue), now))
@@ -467,7 +491,7 @@ def main():
 
         cutoff = now - TRAIL_LIFETIME
         while trail and trail[0][3] < cutoff:
-            trail.pop(0)
+            trail.popleft()
 
         screen.blit(background, (0, 0))
 

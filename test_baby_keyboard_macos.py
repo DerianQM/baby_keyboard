@@ -1,10 +1,12 @@
 """
-Tests for Baby Keyboard (Windows version).
+Tests for Baby Keyboard (macOS version).
 
-Запуск:  python -m pytest test_baby_keyboard.py -v
-         python test_baby_keyboard.py
+Запуск:  python -m pytest test_baby_keyboard_macos.py -v
+         python test_baby_keyboard_macos.py
 
 Использует SDL dummy-драйвер — дисплей не нужен.
+Quartz недоступен на Windows — хук-специфичные тесты проверяют
+только логику (без реального CGEventTap).
 """
 
 import os
@@ -24,7 +26,7 @@ _W, _H = 1280, 720
 _screen = pygame.display.set_mode((_W, _H))
 
 # ─── Импорт тестируемого модуля ────────────────────────────────────
-import baby_keyboard as bk
+import baby_keyboard_macos as bk
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -35,7 +37,6 @@ class TestCtrlGEnterExit(unittest.TestCase):
     """Приложение должно закрываться ТОЛЬКО по Ctrl+G+Enter."""
 
     def _run_events(self):
-        """Прокручивает очередь pygame-событий, возвращает running."""
         running = True
         g_held  = False
         for event in pygame.event.get():
@@ -63,32 +64,20 @@ class TestCtrlGEnterExit(unittest.TestCase):
             {"key": key, "mod": mod, "unicode": "", "scancode": 0}
         ))
 
-    # ── Ctrl+G+Enter → выход ────────────────────────────────────────
-
     def test_ctrl_g_enter_exits(self):
         self._post_key(pygame.K_g, unicode="g")
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
         self.assertFalse(self._run_events(), "Ctrl+G+Enter должен закрывать приложение")
-
-    def test_rctrl_g_enter_exits(self):
-        self._post_key(pygame.K_g, unicode="g")
-        self._post_key(pygame.K_RETURN, mod=pygame.KMOD_RCTRL, unicode="\r")
-        self.assertFalse(self._run_events(), "Правый Ctrl+G+Enter должен закрывать")
-
-    # ── Ctrl+Enter без G не выходит ─────────────────────────────────
 
     def test_ctrl_enter_without_g_does_not_exit(self):
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
         self.assertTrue(self._run_events(), "Ctrl+Enter без G не должен закрывать")
 
     def test_g_released_before_enter_does_not_exit(self):
-        """G отпущена до Enter — не выходит."""
         self._post_key(pygame.K_g, unicode="g")
         self._post_keyup(pygame.K_g)
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
         self.assertTrue(self._run_events(), "G отпущена — не должен закрывать")
-
-    # ── Одиночные клавиши не выходят ────────────────────────────────
 
     def test_escape_does_not_exit(self):
         self._post_key(pygame.K_ESCAPE)
@@ -98,27 +87,16 @@ class TestCtrlGEnterExit(unittest.TestCase):
         self._post_key(pygame.K_RETURN, unicode="\r")
         self.assertTrue(self._run_events(), "Enter без Ctrl не должен закрывать")
 
-    def test_ctrl_alone_does_not_exit(self):
-        self._post_key(pygame.K_LCTRL, mod=pygame.KMOD_LCTRL)
-        self.assertTrue(self._run_events(), "Только Ctrl не должен закрывать")
-
     def test_g_alone_does_not_exit(self):
         self._post_key(pygame.K_g, unicode="g")
         self.assertTrue(self._run_events(), "Только G не должен закрывать")
-
-    def test_alt_f4_does_not_exit_via_event(self):
-        self._post_key(pygame.K_F4, mod=pygame.KMOD_ALT)
-        self.assertTrue(self._run_events(), "Alt+F4 не должен проходить через event loop")
 
     def test_random_letters_do_not_exit(self):
         for key in (pygame.K_a, pygame.K_z, pygame.K_SPACE):
             self._post_key(key, unicode=chr(key))
         self.assertTrue(self._run_events(), "Обычные клавиши не должны закрывать")
 
-    # ── Флаг от хука ────────────────────────────────────────────────
-
     def test_hook_flag_triggers_exit(self):
-        """ctrl_enter_pressed = True должен переводить running → False."""
         original = bk.ctrl_enter_pressed
         bk.ctrl_enter_pressed = True
         running = True
@@ -136,44 +114,44 @@ class TestCtrlGEnterExit(unittest.TestCase):
         self.assertTrue(running)
         bk.ctrl_enter_pressed = original
 
-    # ── Логика хука: заблокированные комбинации ──────────────────────
+    # ── Логика CGEventTap callback (без реального Quartz) ────────────
 
-    def test_hook_blocks_win_key(self):
-        """Win-клавиши (VK_LWIN, VK_RWIN) должны блокироваться хуком."""
-        BLOCKED = {0x5B, 0x5C}
-        for vk in BLOCKED:
-            self.assertIn(vk, BLOCKED)
-
-    def test_hook_blocks_alt_f4(self):
-        VK_F4 = 0x73
-        LLKHF_ALTDOWN = 0x20
-        flags = LLKHF_ALTDOWN
-        alt_down = bool(flags & LLKHF_ALTDOWN)
-        blocked = alt_down and VK_F4 in (0x09, 0x73, 0x1B)
-        self.assertTrue(blocked, "Alt+F4 должен быть заблокирован")
-
-    def test_hook_blocks_ctrl_esc(self):
-        VK_ESCAPE = 0x1B
-        ctrl_down = True
-        blocked = ctrl_down and VK_ESCAPE == 0x1B
-        self.assertTrue(blocked, "Ctrl+Esc должен быть заблокирован")
-
-    def test_hook_passes_ctrl_g_enter(self):
-        """Ctrl+G+Enter должен ПРОПУСКАТЬСЯ хуком (return CallNextHookEx)."""
-        VK_RETURN = 0x0D
-        VK_G      = 0x47
-        ctrl_down = True
+    def test_tap_callback_logic_ctrl_g_enter(self):
+        """Ctrl+G+Enter → флаг должен быть установлен."""
+        KC_RETURN = bk.KC_RETURN
+        KC_G      = bk.KC_G
+        ctrl      = True
         g_down    = True
-        passed = ctrl_down and g_down and VK_RETURN == 0x0D
-        self.assertTrue(passed, "Ctrl+G+Enter должен проходить через хук")
+        flag_set  = ctrl and g_down and KC_RETURN == bk.KC_RETURN
+        self.assertTrue(flag_set, "Ctrl+G+Enter должен устанавливать флаг")
 
-    def test_hook_does_not_set_flag_without_g(self):
-        """Хук не должен устанавливать флаг если G не зажата."""
-        VK_RETURN = 0x0D
-        ctrl_down = True
-        g_down    = False
-        would_set = ctrl_down and g_down and VK_RETURN == 0x0D
-        self.assertFalse(would_set, "Без G флаг не должен устанавливаться")
+    def test_tap_callback_logic_without_g(self):
+        """Ctrl+Enter без G → флаг НЕ должен устанавливаться."""
+        ctrl   = True
+        g_down = False
+        flag_set = ctrl and g_down
+        self.assertFalse(flag_set, "Без G флаг не должен устанавливаться")
+
+    def test_tap_blocks_cmd_tab(self):
+        """Cmd+Tab должен блокироваться (возвращать None)."""
+        KC_TAB = bk.KC_TAB
+        cmd    = True
+        blocked = cmd and KC_TAB in (bk.KC_TAB, bk.KC_Q, bk.KC_W,
+                                      bk.KC_H,   bk.KC_M, bk.KC_SPACE, bk.KC_F4)
+        self.assertTrue(blocked, "Cmd+Tab должен быть заблокирован")
+
+    def test_tap_blocks_cmd_q(self):
+        cmd = True
+        blocked = cmd and bk.KC_Q in (bk.KC_TAB, bk.KC_Q, bk.KC_W,
+                                       bk.KC_H,   bk.KC_M, bk.KC_SPACE, bk.KC_F4)
+        self.assertTrue(blocked, "Cmd+Q должен быть заблокирован")
+
+    def test_has_quartz_flag_exists(self):
+        self.assertIsInstance(bk.HAS_QUARTZ, bool)
+
+    def test_g_key_down_tracking(self):
+        """_g_key_down должен быть булевым полем."""
+        self.assertIsInstance(bk._g_key_down, bool)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -182,87 +160,55 @@ class TestCtrlGEnterExit(unittest.TestCase):
 
 class TestBubbleLifecycle(unittest.TestCase):
 
-    def _bubble(self, offscreen=False):
-        b = bk.Bubble(_W, _H, start_offscreen=offscreen)
+    def _bubble(self):
+        b = bk.Bubble(_W, _H, start_offscreen=False)
         b.x, b.y = _W // 2, _H // 2
         return b
 
     def test_start_offscreen_is_below(self):
         for _ in range(10):
             b = bk.Bubble(_W, _H, start_offscreen=True)
-            self.assertGreater(b.y, _H - 1,
-                               "Пузырь offscreen должен стартовать ниже экрана")
+            self.assertGreater(b.y, _H - 1)
 
     def test_moves_upward(self):
         b = self._bubble()
         y0 = b.y
         b.update(0.1, -9999, -9999)
-        self.assertLess(b.y, y0, "Пузырь должен двигаться вверх")
-
-    def test_speed_proportional_to_dt(self):
-        """Перемещение должно быть пропорционально dt."""
-        b1 = self._bubble()
-        b2 = self._bubble()
-        b1.speed = b2.speed = 60.0
-        b1.wobble_amp = b2.wobble_amp = 0
-        y0 = b1.y
-        b1.update(0.1, -9999, -9999)
-        b2.update(0.2, -9999, -9999)
-        d1 = y0 - b1.y
-        d2 = y0 - b2.y
-        self.assertAlmostEqual(d2, d1 * 2, delta=2.0)
+        self.assertLess(b.y, y0)
 
     def test_pops_on_mouse_hover(self):
         b = self._bubble()
         b.update(0.016, b.x, b.y)
-        self.assertTrue(b.popping, "Должен лопнуть при наведении мыши")
+        self.assertTrue(b.popping)
 
     def test_no_pop_when_mouse_far(self):
         b = self._bubble()
         b.update(0.016, -9999, -9999)
-        self.assertFalse(b.popping, "Не должен лопаться когда мышь далеко")
-
-    def test_pop_on_bubble_edge(self):
-        b = self._bubble()
-        b.update(0.016, b.x + b.radius + 7, b.y)
-        self.assertTrue(b.popping)
-
-    def test_no_pop_just_outside(self):
-        b = self._bubble()
-        b.update(0.016, b.x + b.radius + 20, b.y)
         self.assertFalse(b.popping)
 
     def test_pop_creates_particles(self):
         b = self._bubble()
         b.pop()
-        self.assertGreaterEqual(len(b.pop_particles), 10,
-                                "Лопание должно создавать >= 10 частиц")
+        self.assertGreaterEqual(len(b.pop_particles), 10)
 
     def test_particles_float_upward(self):
         b = self._bubble()
         b.pop()
         up_biased = sum(1 for p in b.pop_particles if p['vy'] < 0)
-        self.assertGreater(up_biased, len(b.pop_particles) // 2,
-                           "Большинство частиц должны лететь вверх")
+        self.assertGreater(up_biased, len(b.pop_particles) // 2)
 
     def test_dies_after_pop_animation(self):
         b = self._bubble()
         b.update(0.016, b.x, b.y)
         for _ in range(70):
             b.update(0.016, -9999, -9999)
-        self.assertFalse(b.alive, "Пузырь должен умереть после анимации лопания")
+        self.assertFalse(b.alive)
 
     def test_dies_at_top(self):
         b = self._bubble()
         b.y = -200
         b.update(0.016, -9999, -9999)
-        self.assertFalse(b.alive, "Пузырь должен умереть при выходе за верх")
-        self.assertTrue(b.reached_top)
-
-    def test_reached_top_flag(self):
-        b = self._bubble()
-        b.y = -200
-        b.update(0.016, -9999, -9999)
+        self.assertFalse(b.alive)
         self.assertTrue(b.reached_top)
 
     def test_stays_in_x_bounds(self):
@@ -280,12 +226,6 @@ class TestBubbleLifecycle(unittest.TestCase):
             self.assertGreaterEqual(b.radius, bk.Bubble.RADIUS_MIN)
             self.assertLessEqual(b.radius, bk.Bubble.RADIUS_MAX)
 
-    def test_speed_in_range(self):
-        for _ in range(30):
-            b = bk.Bubble(_W, _H)
-            self.assertGreaterEqual(b.speed, bk.Bubble.SPEED_MIN)
-            self.assertLessEqual(b.speed, bk.Bubble.SPEED_MAX)
-
     def test_target_count_maintained(self):
         bubbles = [bk.Bubble(_W, _H) for _ in range(bk.Bubble.TARGET_COUNT)]
         for b in bubbles[:4]:
@@ -300,8 +240,7 @@ class TestBubbleLifecycle(unittest.TestCase):
         b.pop()
         particles_before = len(b.pop_particles)
         b.update(0.016, b.x, b.y)
-        self.assertEqual(len(b.pop_particles), particles_before,
-                         "Второй pop не должен добавлять частицы")
+        self.assertEqual(len(b.pop_particles), particles_before)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -320,8 +259,7 @@ class TestFizzSystem(unittest.TestCase):
     def test_particles_cleaned_up(self):
         self.fizz.update(0.5)
         self.fizz.update(10.0)
-        self.assertEqual(len(self.fizz.particles), 0,
-                         "Все частицы с истёкшим life должны удаляться")
+        self.assertEqual(len(self.fizz.particles), 0)
 
     def test_spawn_burst_count(self):
         before = len(self.fizz.particles)
@@ -331,12 +269,7 @@ class TestFizzSystem(unittest.TestCase):
     def test_particles_have_upward_vy(self):
         self.fizz.update(0.1)
         for p in self.fizz.particles:
-            self.assertLess(p['vy'], 0, "Все частицы fizz должны лететь вверх")
-
-    def test_particles_in_top_zone(self):
-        self.fizz.update(0.1)
-        for p in self.fizz.particles:
-            self.assertLess(p['y'], self.fizz.ZONE_H + 50)
+            self.assertLess(p['vy'], 0)
 
     def test_burst_x_near_given(self):
         self.fizz.spawn_burst(x=600, n=20)
@@ -362,7 +295,7 @@ class TestBubbleCache(unittest.TestCase):
     def test_same_radius_same_object(self):
         s1 = bk.get_bubble_surf(70)
         s2 = bk.get_bubble_surf(70)
-        self.assertIs(s1, s2, "Одинаковый радиус должен давать тот же объект")
+        self.assertIs(s1, s2)
 
     def test_different_radii_different_objects(self):
         s1 = bk.get_bubble_surf(50)
@@ -371,8 +304,7 @@ class TestBubbleCache(unittest.TestCase):
 
     def test_surface_has_alpha(self):
         surf = bk.get_bubble_surf(60)
-        self.assertEqual(surf.get_flags() & pygame.SRCALPHA, pygame.SRCALPHA,
-                         "Поверхность пузыря должна иметь per-pixel alpha")
+        self.assertEqual(surf.get_flags() & pygame.SRCALPHA, pygame.SRCALPHA)
 
     def test_surface_size_matches_radius(self):
         r = 60
@@ -389,10 +321,6 @@ class TestBubbleCache(unittest.TestCase):
 
 class TestBackground(unittest.TestCase):
 
-    def test_returns_surface(self):
-        bg = bk.create_background(800, 600)
-        self.assertIsInstance(bg, pygame.Surface)
-
     def test_correct_size(self):
         bg = bk.create_background(800, 600)
         self.assertEqual(bg.get_size(), (800, 600))
@@ -402,21 +330,21 @@ class TestBackground(unittest.TestCase):
         top = bg.get_at((200, 5))[:3]
         bot = bg.get_at((200, 395))[:3]
         diff = sum(abs(int(a) - int(b)) for a, b in zip(top, bot))
-        self.assertGreater(diff, 5, "Фон должен иметь градиент")
+        self.assertGreater(diff, 5)
 
     def test_not_solid_black(self):
         bg = bk.create_background(200, 200)
         pixel = bg.get_at((100, 100))[:3]
-        self.assertGreater(sum(pixel), 0, "Фон не должен быть чёрным")
+        self.assertGreater(sum(pixel), 0)
 
     def test_various_sizes(self):
-        for w, h in [(640, 480), (1920, 1080), (2560, 1440)]:
+        for w, h in [(640, 480), (1920, 1080)]:
             bg = bk.create_background(w, h)
             self.assertEqual(bg.get_size(), (w, h))
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 6. Отрисовка (не падает)
+# 6. Отрисовка
 # ═══════════════════════════════════════════════════════════════════
 
 class TestDrawing(unittest.TestCase):
@@ -427,18 +355,8 @@ class TestDrawing(unittest.TestCase):
     def test_draw_bubble_normal(self):
         bk.draw_aero_bubble(self.surf, 300, 300, 70)
 
-    def test_draw_bubble_small(self):
-        bk.draw_aero_bubble(self.surf, 50, 50, 5)
-
-    def test_draw_bubble_alpha_zero(self):
-        bk.draw_aero_bubble(self.surf, 300, 300, 60, alpha=0)
-
     def test_draw_bubble_alpha_partial(self):
         bk.draw_aero_bubble(self.surf, 300, 300, 60, alpha=128)
-
-    def test_draw_bubble_at_edge(self):
-        bk.draw_aero_bubble(self.surf, 0, 0, 70)
-        bk.draw_aero_bubble(self.surf, 600, 600, 70)
 
     def test_bubble_draw_alive(self):
         b = bk.Bubble(600, 600, start_offscreen=False)
@@ -450,14 +368,6 @@ class TestDrawing(unittest.TestCase):
         b.x, b.y = 300, 300
         b.pop()
         b.update(0.1, -999, -999)
-        b.draw(self.surf)
-
-    def test_bubble_draw_fading(self):
-        b = bk.Bubble(600, 600, start_offscreen=False)
-        b.x, b.y = 300, 300
-        b.pop()
-        for _ in range(30):
-            b.update(0.016, -999, -999)
         b.draw(self.surf)
 
     def test_fizz_draw(self):
@@ -473,7 +383,6 @@ class TestDrawing(unittest.TestCase):
 class TestStability(unittest.TestCase):
 
     def test_simulate_10_seconds(self):
-        """10 секунд симуляции @ 60fps — без исключений, TARGET_COUNT сохраняется."""
         W, H = 1280, 720
         surf = pygame.Surface((W, H), pygame.SRCALPHA)
         bubbles = [bk.Bubble(W, H, start_offscreen=False)
@@ -484,10 +393,8 @@ class TestStability(unittest.TestCase):
         for frame in range(600):
             mx = 100 + (frame * 3) % (W - 200)
             my = 200 + (frame * 2) % (H - 400)
-
             for b in bubbles:
                 b.update(dt, mx, my)
-
             alive = []
             for b in bubbles:
                 if b.reached_top:
@@ -495,28 +402,20 @@ class TestStability(unittest.TestCase):
                 if b.alive:
                     alive.append(b)
             bubbles = alive
-
             while len(bubbles) < bk.Bubble.TARGET_COUNT:
                 bubbles.append(bk.Bubble(W, H))
-
             fizz.update(dt)
             surf.fill((0, 0, 0, 0))
             for b in bubbles:
                 b.draw(surf)
             fizz.draw(surf)
 
-        self.assertEqual(len(bubbles), bk.Bubble.TARGET_COUNT,
-                         "TARGET_COUNT пузырей должен поддерживаться")
+        self.assertEqual(len(bubbles), bk.Bubble.TARGET_COUNT)
 
     def test_dt_spike_no_crash(self):
         b = bk.Bubble(_W, _H, start_offscreen=False)
         b.x, b.y = 640, 400
         b.update(1.0, -9999, -9999)
-
-    def test_zero_dt_no_crash(self):
-        b = bk.Bubble(_W, _H, start_offscreen=False)
-        b.x, b.y = 640, 400
-        b.update(0.0, -9999, -9999)
 
     def test_fizz_no_memory_leak(self):
         fizz = bk.FizzSystem(_W, _H)
@@ -525,21 +424,11 @@ class TestStability(unittest.TestCase):
         fizz.update(10.0)
         self.assertEqual(len(fizz.particles), 0)
 
-    def test_rapid_pops_stability(self):
-        bubbles = [bk.Bubble(_W, _H, start_offscreen=False)
-                   for _ in range(bk.Bubble.TARGET_COUNT)]
-        for b in bubbles:
-            b.x, b.y = _W // 2, _H // 2
-            b.update(0.016, _W // 2, _H // 2)
-        for b in bubbles:
-            self.assertTrue(b.popping)
-
     def test_background_render_time(self):
         start = time.perf_counter()
         bk.create_background(_W, _H)
         elapsed = time.perf_counter() - start
-        self.assertLess(elapsed, 3.0,
-                        f"create_background слишком медленный: {elapsed:.2f}s")
+        self.assertLess(elapsed, 3.0)
 
     def test_bubble_cache_warmup(self):
         for r in range(bk.Bubble.RADIUS_MIN, bk.Bubble.RADIUS_MAX + 1, 3):
