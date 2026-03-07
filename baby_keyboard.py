@@ -5,14 +5,17 @@ Baby Keyboard — безопасная песочница для малыша.
 при наведении мыши. Закрытие только по Ctrl+G+Enter.
 """
 
+import array
 import ctypes
 import ctypes.wintypes as wintypes
+import io
 import threading
 import time
 import random
 import colorsys
 import math
 import sys
+import wave
 from collections import deque
 
 import pygame
@@ -54,6 +57,12 @@ user32.GetAsyncKeyState.argtypes    = [ctypes.c_int]
 user32.GetAsyncKeyState.restype     = ctypes.c_short
 kernel32.GetModuleHandleW.argtypes  = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype   = wintypes.HMODULE
+user32.SystemParametersInfoW.argtypes = [
+    wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT,
+]
+user32.SystemParametersInfoW.restype  = wintypes.BOOL
+user32.SetForegroundWindow.argtypes   = [wintypes.HWND]
+user32.SetForegroundWindow.restype    = wintypes.BOOL
 
 HOOKPROC = ctypes.CFUNCTYPE(
     ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
@@ -68,6 +77,73 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
         ("time",        wintypes.DWORD),
         ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
     ]
+
+
+# ─── Специальные возможности Windows ──────────────────────────────
+# 5×Shift → StickyKeys, Shift ×8с → FilterKeys, NumLock ×5с → ToggleKeys
+# Отключаем их горячие клавиши на время работы и восстанавливаем при выходе.
+
+SPI_GETSTICKYKEYS = 0x003A
+SPI_SETSTICKYKEYS = 0x003B
+SPI_GETFILTERKEYS = 0x0032
+SPI_SETFILTERKEYS = 0x0033
+SPI_GETTOGGLEKEYS = 0x0034
+SPI_SETTOGGLEKEYS = 0x0035
+
+
+class STICKYKEYS(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD)]
+
+
+class FILTERKEYS(ctypes.Structure):
+    _fields_ = [
+        ("cbSize",      wintypes.DWORD),
+        ("dwFlags",     wintypes.DWORD),
+        ("iWaitMSec",   wintypes.DWORD),
+        ("iDelayMSec",  wintypes.DWORD),
+        ("iRepeatMSec", wintypes.DWORD),
+        ("iBounceMSec", wintypes.DWORD),
+    ]
+
+
+class TOGGLEKEYS(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD)]
+
+
+_saved_sk = STICKYKEYS(cbSize=ctypes.sizeof(STICKYKEYS), dwFlags=0)
+_saved_fk = FILTERKEYS(cbSize=ctypes.sizeof(FILTERKEYS), dwFlags=0)
+_saved_tk = TOGGLEKEYS(cbSize=ctypes.sizeof(TOGGLEKEYS), dwFlags=0)
+
+
+def disable_accessibility_shortcuts():
+    """Сохраняет и отключает горячие клавиши StickyKeys/FilterKeys/ToggleKeys."""
+    global _saved_sk, _saved_fk, _saved_tk
+    _saved_sk = STICKYKEYS(cbSize=ctypes.sizeof(STICKYKEYS), dwFlags=0)
+    user32.SystemParametersInfoW(SPI_GETSTICKYKEYS,
+                                 ctypes.sizeof(STICKYKEYS), ctypes.byref(_saved_sk), 0)
+    _saved_fk = FILTERKEYS(cbSize=ctypes.sizeof(FILTERKEYS), dwFlags=0)
+    user32.SystemParametersInfoW(SPI_GETFILTERKEYS,
+                                 ctypes.sizeof(FILTERKEYS), ctypes.byref(_saved_fk), 0)
+    _saved_tk = TOGGLEKEYS(cbSize=ctypes.sizeof(TOGGLEKEYS), dwFlags=0)
+    user32.SystemParametersInfoW(SPI_GETTOGGLEKEYS,
+                                 ctypes.sizeof(TOGGLEKEYS), ctypes.byref(_saved_tk), 0)
+
+    user32.SystemParametersInfoW(SPI_SETSTICKYKEYS, ctypes.sizeof(STICKYKEYS),
+                                 ctypes.byref(STICKYKEYS(cbSize=ctypes.sizeof(STICKYKEYS), dwFlags=0)), 0)
+    user32.SystemParametersInfoW(SPI_SETFILTERKEYS, ctypes.sizeof(FILTERKEYS),
+                                 ctypes.byref(FILTERKEYS(cbSize=ctypes.sizeof(FILTERKEYS), dwFlags=0)), 0)
+    user32.SystemParametersInfoW(SPI_SETTOGGLEKEYS, ctypes.sizeof(TOGGLEKEYS),
+                                 ctypes.byref(TOGGLEKEYS(cbSize=ctypes.sizeof(TOGGLEKEYS), dwFlags=0)), 0)
+
+
+def restore_accessibility_shortcuts():
+    """Восстанавливает исходные настройки специальных возможностей."""
+    user32.SystemParametersInfoW(SPI_SETSTICKYKEYS,
+                                 ctypes.sizeof(STICKYKEYS), ctypes.byref(_saved_sk), 0)
+    user32.SystemParametersInfoW(SPI_SETFILTERKEYS,
+                                 ctypes.sizeof(FILTERKEYS), ctypes.byref(_saved_fk), 0)
+    user32.SystemParametersInfoW(SPI_SETTOGGLEKEYS,
+                                 ctypes.sizeof(TOGGLEKEYS), ctypes.byref(_saved_tk), 0)
 
 
 # ─── Глобальное состояние ──────────────────────────────────────────
@@ -404,6 +480,161 @@ class FizzSystem:
             draw_aero_bubble(surface, p['x'], p['y'], max(2, int(p['r'])), a)
 
 
+# ─── Краска внутри пузыря ──────────────────────────────────────────
+
+_PAINT_COLORS = [
+    (220,  55,  55),   # красный
+    (255, 130,  20),   # оранжевый
+    ( 55, 185,  55),   # зелёный
+    ( 45, 115, 220),   # синий
+    (160,  45, 200),   # фиолетовый
+    (225, 195,   0),   # жёлтый
+    ( 20, 175, 160),   # бирюзовый
+    (220,  55, 140),   # малиновый
+]
+
+
+class PaintSystem:
+    """Акварельные пятна краски, растворяющиеся в воде после лопания пузыря."""
+
+    def __init__(self):
+        self.blobs = []
+
+    def spawn(self, x, y, bubble_r):
+        color = random.choice(_PAINT_COLORS)
+        for _ in range(random.randint(5, 9)):
+            life  = random.uniform(2.2, 3.8)
+            r0    = random.uniform(bubble_r * 0.15, bubble_r * 0.55)
+            r_max = random.uniform(bubble_r * 0.9,  bubble_r * 2.4)
+            self.blobs.append({
+                'x':        x + random.uniform(-bubble_r * 0.35, bubble_r * 0.35),
+                'y':        y + random.uniform(-bubble_r * 0.35, bubble_r * 0.35),
+                'r0':       r0,
+                'r_max':    r_max,
+                'life':     life,
+                'max_life': life,
+                'color':    color,
+                'vx':       random.uniform(-18, 18),
+                'vy':       random.uniform(-8,  22),
+            })
+
+    def update(self, dt):
+        for b in self.blobs:
+            b['life'] -= dt
+            b['x']    += b['vx'] * dt
+            b['y']    += b['vy'] * dt
+            b['vx']   *= 0.97
+            b['vy']   *= 0.97
+        self.blobs = [b for b in self.blobs if b['life'] > 0]
+
+    def draw(self, surface):
+        for b in self.blobs:
+            t     = b['life'] / b['max_life']   # 1.0 → 0.0
+            prog  = 1.0 - t
+            r_fac = min(1.0, prog * 2.8)
+            r     = int(b['r0'] + (b['r_max'] - b['r0']) * r_fac)
+            alpha = int(95 * t * t)
+            if alpha < 3 or r < 2:
+                continue
+            cx, cy = int(b['x']), int(b['y'])
+            col    = b['color']
+            pygame.draw.circle(surface, (*col, alpha),      (cx, cy), r)
+            pygame.draw.circle(surface, (*col, alpha // 2), (cx, cy), int(r * 1.4))
+            pygame.draw.circle(surface, (*col, alpha // 4), (cx, cy), int(r * 1.9))
+
+
+# ─── Звуки ─────────────────────────────────────────────────────────
+
+def _make_pop_sound():
+    """Короткий нисходящий тон + шум — звук лопнувшего пузыря."""
+    try:
+        sr  = 44100
+        n   = int(sr * 0.16)
+        buf = array.array('h')
+        for i in range(n):
+            t     = i / sr
+            freq  = 480 * math.exp(-t * 30)
+            env   = math.exp(-t * 25)
+            noise = random.uniform(-0.45, 0.45)
+            val   = (0.55 * math.sin(2 * math.pi * freq * t) + 0.45 * noise) * env
+            s     = int(32767 * 0.5 * val)
+            buf.append(s)
+            buf.append(s)
+        return pygame.mixer.Sound(buffer=buf)
+    except Exception:
+        return None
+
+
+def _make_fizz_sound():
+    """Мягкое шипение — звук пузырьков у поверхности."""
+    try:
+        sr  = 44100
+        n   = int(sr * 0.28)
+        buf = array.array('h')
+        for i in range(n):
+            t   = i / sr
+            env = math.exp(-t * 7) * (1 - math.exp(-t * 50))
+            s   = int(32767 * 0.2 * random.uniform(-1.0, 1.0) * env)
+            buf.append(s)
+            buf.append(s)
+        return pygame.mixer.Sound(buffer=buf)
+    except Exception:
+        return None
+
+
+def _make_music_wav():
+    """
+    Генерирует ~6-секундный WAV-цикл: мягкий пентатонический дрон
+    с плавной мелодией — лёгкая фоновая музыкальная шкатулка.
+    Возвращает BytesIO, пригодный для pygame.mixer.music.load().
+    """
+    sr       = 44100
+    duration = 6.0
+    n        = int(sr * duration)
+
+    # Мелодия: ноты C4→E4→G4→A4→G4→E4 (по 1 секунде каждая)
+    melody = [261.63, 329.63, 392.00, 440.00, 392.00, 329.63]
+    nd     = duration / len(melody)
+
+    buf = array.array('h')
+    for i in range(n):
+        t = i / sr
+
+        # Дрон: C3-G3-C4 (очень тихо)
+        val = (0.022 * math.sin(2 * math.pi * 130.81 * t) +
+               0.018 * math.sin(2 * math.pi * 196.00 * t) +
+               0.014 * math.sin(2 * math.pi * 261.63 * t) +
+               0.010 * math.sin(2 * math.pi * 392.00 * t))
+
+        # Медленное покачивание (тремоло ~0.25 Гц)
+        val *= 0.85 + 0.15 * math.sin(2 * math.pi * 0.25 * t)
+
+        # Мелодия
+        mi  = min(int(t / nd), len(melody) - 1)
+        mt  = t - mi * nd
+        mf  = melody[mi]
+        env = min(mt / 0.08, 1.0) * math.exp(-mt * 2.2)
+        val += 0.065 * env * math.sin(2 * math.pi * mf * t)
+        val += 0.020 * env * math.sin(4 * math.pi * mf * t)   # октава
+
+        # Плавное начало/конец для бесшовного цикла
+        fade = min(1.0, t / 0.4) * min(1.0, (n - i - 1) / (sr * 0.4))
+        val *= fade
+
+        s = max(-32767, min(32767, int(32767 * val)))
+        buf.append(s)
+        buf.append(s)
+
+    wav_io = io.BytesIO()
+    with wave.open(wav_io, 'wb') as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(buf.tobytes())
+    wav_io.seek(0)
+    return wav_io
+
+
 # ─── Главное приложение ────────────────────────────────────────────
 
 def hue_to_rgb(hue):
@@ -414,8 +645,10 @@ def hue_to_rgb(hue):
 def main():
     global ctrl_enter_pressed
 
+    disable_accessibility_shortcuts()
     start_hook()  # блокируется до готовности хука (threading.Event)
 
+    pygame.mixer.pre_init(44100, -16, 2, 512)
     pygame.init()
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.NOFRAME)
     pygame.display.set_caption("Baby Keyboard")
@@ -423,6 +656,16 @@ def main():
 
     hwnd = pygame.display.get_wm_info()["window"]
     user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE)
+
+    # ── Звуки и фоновая музыка ──
+    pop_sound  = _make_pop_sound()
+    fizz_sound = _make_fizz_sound()
+    try:
+        pygame.mixer.music.load(_make_music_wav())
+        pygame.mixer.music.set_volume(0.18)
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"WARN: музыка недоступна ({e})", file=sys.stderr)
 
     clock = pygame.time.Clock()
     font  = pygame.font.SysFont("Arial", 96, bold=True)
@@ -436,14 +679,17 @@ def main():
     trail_surf = pygame.Surface((W, H), pygame.SRCALPHA)
 
     trail          = deque()
-    TRAIL_LIFETIME = 2.0
+    TRAIL_LIFETIME = 4.5
     trail_hue      = 0.0
 
     bubbles = [Bubble(W, H, start_offscreen=False) for _ in range(Bubble.TARGET_COUNT)]
     for b in bubbles:
         b.y = random.uniform(b.radius + 10, H - b.radius - 10)
 
-    fizz = FizzSystem(W, H)
+    fizz  = FizzSystem(W, H)
+    paint = PaintSystem()
+
+    last_fizz_sound = 0.0   # антиспам для звука шипения
 
     chars       = []
     cursor_x    = 20
@@ -486,18 +732,36 @@ def main():
             elif event.type == pygame.MOUSEMOTION:
                 trail_hue += 0.002
                 trail.append((event.pos[0], event.pos[1], hue_to_rgb(trail_hue), now))
+            elif event.type == pygame.ACTIVEEVENT:
+                # Если окно потеряло фокус — вернуть на передний план
+                if hasattr(event, 'gain') and not event.gain:
+                    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                        SWP_NOMOVE | SWP_NOSIZE)
+                    user32.SetForegroundWindow(hwnd)
 
         if ctrl_enter_pressed:
             running = False
 
         # ─── Обновление ───
+        popping_before = {id(b) for b in bubbles if b.popping}
+
         for b in bubbles:
             b.update(dt, mx, my)
+
+        # Реакция на новые лопания: краска + звук
+        for b in bubbles:
+            if b.popping and id(b) not in popping_before:
+                paint.spawn(b.x, b.y, b.radius)
+                if pop_sound:
+                    pop_sound.play()
 
         alive_next = []
         for b in bubbles:
             if b.reached_top:
                 fizz.spawn_burst(b.x)
+                if fizz_sound and now - last_fizz_sound > 0.35:
+                    fizz_sound.play()
+                    last_fizz_sound = now
             if b.alive:
                 alive_next.append(b)
         bubbles = alive_next
@@ -506,6 +770,7 @@ def main():
             bubbles.append(Bubble(W, H, start_offscreen=True))
 
         fizz.update(dt)
+        paint.update(dt)
 
         cutoff = now - TRAIL_LIFETIME
         while trail and trail[0][3] < cutoff:
@@ -516,6 +781,7 @@ def main():
         screen.blit(background, (0, 0))
 
         dyn_surf.fill((0, 0, 0, 0))
+        paint.draw(dyn_surf)        # краска под пузырями
         for b in bubbles:
             b.draw(dyn_surf)
         fizz.draw(dyn_surf)
@@ -538,6 +804,7 @@ def main():
         pygame.display.flip()
         clock.tick(60)
 
+    restore_accessibility_shortcuts()
     stop_hook()
     pygame.quit()
 

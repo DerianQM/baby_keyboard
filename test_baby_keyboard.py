@@ -547,5 +547,63 @@ class TestStability(unittest.TestCase):
             self.assertIsNotNone(surf)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 8. PaintSystem
+# ═══════════════════════════════════════════════════════════════════
+
+class TestPaintSystem(unittest.TestCase):
+
+    def setUp(self):
+        self.paint = bk.PaintSystem()
+
+    def test_spawn_creates_blobs(self):
+        self.paint.spawn(400, 300, 80)
+        self.assertGreaterEqual(len(self.paint.blobs), 5)
+        self.assertLessEqual(len(self.paint.blobs), 9)
+
+    def test_blobs_have_required_keys(self):
+        self.paint.spawn(400, 300, 80)
+        for b in self.paint.blobs:
+            for key in ('x', 'y', 'r0', 'r_max', 'life', 'max_life', 'color', 'vx', 'vy'):
+                self.assertIn(key, b)
+
+    def test_blobs_expire_after_update(self):
+        self.paint.spawn(400, 300, 80)
+        self.paint.update(100.0)
+        self.assertEqual(len(self.paint.blobs), 0, "Все блобы должны умереть после большого dt")
+
+    def test_blobs_move_on_update(self):
+        self.paint.spawn(400, 300, 80)
+        initial = [(b['x'], b['y']) for b in self.paint.blobs]
+        self.paint.update(0.1)
+        moved = any((b['x'], b['y']) != p for b, p in zip(self.paint.blobs, initial))
+        self.assertTrue(moved, "Блобы должны двигаться после update")
+
+    def test_draw_no_crash(self):
+        surf = pygame.Surface((800, 600), pygame.SRCALPHA)
+        self.paint.spawn(400, 300, 80)
+        self.paint.update(0.5)
+        self.paint.draw(surf)
+
+    def test_draw_empty_no_crash(self):
+        surf = pygame.Surface((800, 600), pygame.SRCALPHA)
+        self.paint.draw(surf)
+
+    def test_r_max_larger_than_r0(self):
+        self.paint.spawn(400, 300, 80)
+        for b in self.paint.blobs:
+            self.assertGreater(b['r_max'], b['r0'])
+
+    def test_multiple_spawns_accumulate(self):
+        for _ in range(5):
+            self.paint.spawn(400, 300, 80)
+        self.assertGreaterEqual(len(self.paint.blobs), 25)
+
+    def test_color_from_palette(self):
+        self.paint.spawn(400, 300, 80)
+        for b in self.paint.blobs:
+            self.assertIn(b['color'], bk._PAINT_COLORS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
