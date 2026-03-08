@@ -605,5 +605,260 @@ class TestPaintSystem(unittest.TestCase):
             self.assertIn(b['color'], bk._PAINT_COLORS)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 9. Clam — граничные случаи и FSM
+# ═══════════════════════════════════════════════════════════════════
+
+class TestClamBoundary(unittest.TestCase):
+
+    def _clam(self, open_val=0.0):
+        c = bk.Clam(cx=640, sand_y=600)
+        c.open = open_val
+        return c
+
+    def _surf(self):
+        return pygame.Surface((1280, 720), pygame.SRCALPHA)
+
+    def test_draw_open_zero_no_crash(self):
+        c = self._clam(0.0)
+        c.draw(self._surf())
+
+    def test_draw_open_one_no_crash(self):
+        c = self._clam(1.0)
+        c.draw(self._surf())
+
+    def test_draw_open_half_no_crash(self):
+        c = self._clam(0.5)
+        c.draw(self._surf())
+
+    def test_draw_open_tiny_no_crash(self):
+        c = self._clam(0.001)
+        c.draw(self._surf())
+
+    def test_gap_never_negative(self):
+        import math
+        for open_val in [0.0, 0.001, 0.1, 0.42, 0.5, 1.0]:
+            angle_rad = math.radians(open_val * bk.Clam.MAX_ANGLE_DEG)
+            gap = int(bk.Clam.TOP_H * math.sin(angle_rad))
+            self.assertGreaterEqual(gap, 0, f"gap<0 при open={open_val}")
+
+    def test_app_ry_never_zero(self):
+        import math
+        for open_val in [0.0, 0.5, 1.0]:
+            angle_rad = math.radians(open_val * bk.Clam.MAX_ANGLE_DEG)
+            app_ry = max(4, int(bk.Clam.TOP_H * math.cos(angle_rad)))
+            self.assertGreaterEqual(app_ry, 4, f"app_ry<4 при open={open_val}")
+
+    def test_draw_with_cx_zero_no_crash(self):
+        c = bk.Clam(cx=0, sand_y=600)
+        c.open = 0.5
+        c.draw(self._surf())
+
+    def test_draw_with_sand_y_small_no_crash(self):
+        c = bk.Clam(cx=640, sand_y=100)
+        c.open = 0.5
+        c.draw(self._surf())
+
+    def test_draw_large_open_face_no_crash(self):
+        c = self._clam(1.0)
+        c.state = bk._CS_HAPPY
+        c.wave_angle = 20.0
+        c.draw(self._surf())
+
+    def test_draw_happy_arm_no_crash(self):
+        c = self._clam(1.0)
+        c.state = bk._CS_HAPPY
+        c.wave_angle = 0.0
+        c.draw(self._surf())
+
+
+class TestClamFSM(unittest.TestCase):
+
+    def _no_events(self):
+        return []
+
+    def _make_clam(self):
+        c = bk.Clam(cx=640, sand_y=600)
+        c.state = bk._CS_IDLE_CLOSED
+        c.idle_timer = 0.001
+        return c
+
+    def test_fsm_idle_closed_to_opening(self):
+        c = self._make_clam()
+        c.update(0.1, -9999, -9999, self._no_events())
+        self.assertEqual(c.state, bk._CS_OPENING)
+
+    def test_fsm_opening_to_idle_open(self):
+        c = self._make_clam()
+        c.update(0.1, -9999, -9999, self._no_events())
+        self.assertEqual(c.state, bk._CS_OPENING)
+        for _ in range(200):
+            c.update(0.05, -9999, -9999, self._no_events())
+            if c.state == bk._CS_IDLE_OPEN:
+                break
+        self.assertEqual(c.state, bk._CS_IDLE_OPEN)
+
+    def test_fsm_idle_open_to_closing(self):
+        c = self._make_clam()
+        c.state = bk._CS_IDLE_OPEN
+        c.hold_timer = 0.001
+        c.update(0.1, -9999, -9999, self._no_events())
+        self.assertEqual(c.state, bk._CS_CLOSING)
+
+    def test_fsm_closing_to_idle_closed(self):
+        c = self._make_clam()
+        c.state = bk._CS_CLOSING
+        c.open = 0.001
+        for _ in range(50):
+            c.update(0.05, -9999, -9999, self._no_events())
+            if c.state == bk._CS_IDLE_CLOSED:
+                break
+        self.assertEqual(c.state, bk._CS_IDLE_CLOSED)
+
+    def test_fsm_idle_closed_to_hiding_on_near(self):
+        c = self._make_clam()
+        c.idle_timer = 999.0
+        c.update(0.016, 640, 515, self._no_events())
+        self.assertEqual(c.state, bk._CS_HIDING)
+
+    def test_fsm_hiding_to_idle_closed_when_far(self):
+        c = self._make_clam()
+        c.state = bk._CS_HIDING
+        c.update(0.016, -9999, -9999, self._no_events())
+        self.assertEqual(c.state, bk._CS_IDLE_CLOSED)
+
+    def test_fsm_happy_full_cycle(self):
+        c = self._make_clam()
+        c.state = bk._CS_HAPPY_OPENING
+        for _ in range(200):
+            c.update(0.05, -9999, -9999, self._no_events())
+            if c.state == bk._CS_HAPPY:
+                break
+        self.assertEqual(c.state, bk._CS_HAPPY)
+        c.happy_timer = 0.001
+        c.update(0.1, -9999, -9999, self._no_events())
+        self.assertEqual(c.state, bk._CS_HAPPY_CLOSING)
+        for _ in range(100):
+            c.update(0.05, -9999, -9999, self._no_events())
+            if c.state == bk._CS_IDLE_CLOSED:
+                break
+        self.assertEqual(c.state, bk._CS_IDLE_CLOSED)
+
+    def test_fsm_open_value_in_range(self):
+        c = self._make_clam()
+        for _ in range(300):
+            c.update(0.016, -9999, -9999, self._no_events())
+            self.assertGreaterEqual(c.open, 0.0)
+            self.assertLessEqual(c.open, 1.0)
+
+    def test_draw_all_states_no_crash(self):
+        surf = pygame.Surface((1280, 720), pygame.SRCALPHA)
+        for state in [bk._CS_IDLE_CLOSED, bk._CS_OPENING,
+                      bk._CS_IDLE_OPEN, bk._CS_CLOSING,
+                      bk._CS_HIDING, bk._CS_HAPPY_OPENING,
+                      bk._CS_HAPPY, bk._CS_HAPPY_CLOSING]:
+            c = bk.Clam(cx=640, sand_y=600)
+            c.state = state
+            c.open = 0.5
+            c.draw(surf)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 10. SeabedDecor — не перекрывает зону клама
+# ═══════════════════════════════════════════════════════════════════
+
+class TestSeabedDecorNoOverlapClam(unittest.TestCase):
+
+    def test_seaweeds_x_outside_clam_zone(self):
+        """Водоросли не должны перекрывать зону клама."""
+        W, H = 1280, 720
+        decor = bk.SeabedDecor(W, H)
+        clam_cx = max(bk.Clam.RX + 20, int(W * 0.24))
+        clam_rx = bk.Clam.RX
+        for sw in decor.seaweeds:
+            x = sw['x']
+            outside = (x > clam_cx + clam_rx) or (x < clam_cx - clam_rx)
+            self.assertTrue(outside,
+                f"Водоросль x={x} перекрывает зону клама cx={clam_cx} rx={clam_rx}")
+
+    def test_right_side_decor_outside_clam_zone(self):
+        """Декорации правее 0.5W не должны перекрывать зону клама."""
+        W, H = 1280, 720
+        decor = bk.SeabedDecor(W, H)
+        clam_cx = max(bk.Clam.RX + 20, int(W * 0.24))
+        clam_rx = bk.Clam.RX
+        right_x = []
+        for c in decor.coral_brain:
+            right_x.append(c['x'])
+        for c in decor.coral_fan:
+            right_x.append(c['x'])
+        for c in decor.coral_tube:
+            right_x.append(c['x'])
+        for x in right_x:
+            outside = (x > clam_cx + clam_rx) or (x < clam_cx - clam_rx)
+            self.assertTrue(outside,
+                f"Коралл x={x} перекрывает зону клама cx={clam_cx} rx={clam_rx}")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 11. Stability 30 секунд симуляции
+# ═══════════════════════════════════════════════════════════════════
+
+class TestStability30s(unittest.TestCase):
+
+    def test_simulate_30_seconds_no_exception(self):
+        W, H = 1280, 720
+        surf = pygame.Surface((W, H), pygame.SRCALPHA)
+        sand_y = H - int(H * bk.SAND_H_FRAC)
+        bubbles = [bk.Bubble(W, H, start_offscreen=False)
+                   for _ in range(bk.Bubble.TARGET_COUNT)]
+        fizz   = bk.FizzSystem(W, H)
+        fishes = bk.FishSystem()
+        paint  = bk.PaintSystem()
+        decor  = bk.SeabedDecor(W, H)
+        clam   = bk.Clam(cx=max(bk.Clam.RX + 20, int(W * 0.24)), sand_y=sand_y)
+        dt = 1 / 60
+        t  = 0.0
+
+        for frame in range(30 * 60):
+            mx = 100 + (frame * 3) % (W - 200)
+            my = 200 + (frame * 2) % (H - 400)
+            t += dt
+
+            popping_before = {id(b) for b in bubbles if b.popping}
+            for b in bubbles:
+                b.update(dt, mx, my)
+            for b in bubbles:
+                if b.popping and id(b) not in popping_before:
+                    if b.has_fish:
+                        fishes.spawn_from_bubble(b.x, b.y, b.radius, b.inner_fish)
+                    else:
+                        paint.spawn(b.x, b.y, b.radius)
+
+            alive = [b for b in bubbles if b.alive]
+            for b in bubbles:
+                if b.reached_top:
+                    fizz.spawn_burst(b.x)
+            bubbles = [b for b in bubbles if b.alive]
+            while len(bubbles) < bk.Bubble.TARGET_COUNT:
+                bubbles.append(bk.Bubble(W, H))
+
+            fizz.update(dt)
+            fishes.update(dt)
+            paint.update(dt)
+            clam.update(dt, mx, my, [])
+
+            surf.fill((0, 0, 0, 0))
+            decor.draw(surf, t)
+            clam.draw(surf)
+            for b in bubbles:
+                b.draw(surf)
+            fizz.draw(surf)
+            fishes.draw(surf)
+            paint.draw(surf)
+
+        self.assertEqual(len(bubbles), bk.Bubble.TARGET_COUNT)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

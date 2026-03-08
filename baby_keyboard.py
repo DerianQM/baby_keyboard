@@ -694,6 +694,64 @@ class FishSystem:
             draw_fish(surface, f['x'], f['y'], f['length'], disp_angle, f['color'], alpha)
 
 
+# ─── Краска — брызги при лопании ───────────────────────────────────
+
+_PAINT_COLORS = [
+    (255,  80,  60),
+    (255, 165,   0),
+    ( 80, 200,  80),
+    ( 60, 120, 255),
+    (220,  50, 220),
+    (255, 220,   0),
+    ( 40, 200, 200),
+    (255, 120, 180),
+]
+
+
+class PaintSystem:
+    """Брызги краски при лопании пузыря без рыбок."""
+
+    def __init__(self):
+        self.blobs = []
+
+    def spawn(self, x, y, bubble_r):
+        for _ in range(random.randint(5, 9)):
+            angle = random.uniform(0, math.pi * 2)
+            spd   = random.uniform(40, 120)
+            life  = random.uniform(0.6, 1.2)
+            r0    = random.uniform(2, 6)
+            r_max = r0 + random.uniform(bubble_r * 0.15, bubble_r * 0.35)
+            self.blobs.append({
+                'x':        x + random.uniform(-bubble_r * 0.3, bubble_r * 0.3),
+                'y':        y + random.uniform(-bubble_r * 0.3, bubble_r * 0.3),
+                'vx':       math.cos(angle) * spd,
+                'vy':       math.sin(angle) * spd,
+                'r0':       r0,
+                'r_max':    r_max,
+                'life':     life,
+                'max_life': life,
+                'color':    random.choice(_PAINT_COLORS),
+            })
+
+    def update(self, dt):
+        for b in self.blobs:
+            b['x']    += b['vx'] * dt
+            b['y']    += b['vy'] * dt
+            b['vx']   *= 0.92
+            b['vy']   *= 0.92
+            b['life'] -= dt
+        self.blobs = [b for b in self.blobs if b['life'] > 0]
+
+    def draw(self, surface):
+        for b in self.blobs:
+            t = b['life'] / b['max_life']
+            r = int(b['r0'] + (b['r_max'] - b['r0']) * (1.0 - t))
+            a = int(200 * t)
+            if r > 0 and a > 0:
+                pygame.draw.circle(surface, (*b['color'], a),
+                                   (int(b['x']), int(b['y'])), r)
+
+
 # ─── Дно аквариума ─────────────────────────────────────────────────
 
 SAND_H_FRAC = 0.10   # высота полосы дна (доля от высоты экрана)
@@ -815,11 +873,11 @@ class SeabedDecor:
 
         # ── Водоросли: 3 шт, 2 типа — пушистые (hornwort) и ленточные ──
         self.seaweeds = [
-            {'x': int(W * 0.27), 'kind': 'feathery', 'color': (58, 178, 72),
+            {'x': int(W * 0.55), 'kind': 'feathery', 'color': (58, 178, 72),
              'phase': rng.uniform(0, math.pi * 2), 'height': rng.randint(170, 230)},
-            {'x': int(W * 0.50), 'kind': 'ribbon',   'color': (38, 138, 105),
+            {'x': int(W * 0.68), 'kind': 'ribbon',   'color': (38, 138, 105),
              'phase': rng.uniform(0, math.pi * 2), 'height': rng.randint(190, 255)},
-            {'x': int(W * 0.73), 'kind': 'feathery', 'color': (48, 162, 62),
+            {'x': int(W * 0.82), 'kind': 'feathery', 'color': (48, 162, 62),
              'phase': rng.uniform(0, math.pi * 2), 'height': rng.randint(170, 225)},
         ]
 
@@ -827,7 +885,7 @@ class SeabedDecor:
 
         # 1. Ветвистый (красный) — крайний левый
         self.coral_branch = [
-            {'x': int(W * 0.10) + rng.randint(-15, 15),
+            {'x': int(W * 0.07) + rng.randint(-10, 10),
              'height': rng.randint(190, 260), 'color': (222, 58, 58),
              'seed': rng.randint(0, 99999)},
             {'x': int(W * 0.88) + rng.randint(-15, 15),
@@ -837,27 +895,27 @@ class SeabedDecor:
 
         # 2. Мозговой — чуть левее центра
         self.coral_brain = [
-            {'x': int(W * 0.38) + rng.randint(-15, 15),
+            {'x': int(W * 0.62) + rng.randint(-15, 15),
              'r': rng.randint(62, 88), 'color': (192, 165, 38)},
         ]
 
         # 3. Веерный (фиолетовый) — правее центра
         self.coral_fan = [
-            {'x': int(W * 0.60) + rng.randint(-15, 15),
+            {'x': int(W * 0.74) + rng.randint(-15, 15),
              'height': rng.randint(195, 260), 'color': (148, 55, 205),
              'seed': rng.randint(0, 99999)},
         ]
 
         # 4. Оленерогий (staghorn) — бежево-розовый
         self.coral_staghorn = [
-            {'x': int(W * 0.76) + rng.randint(-15, 15),
+            {'x': int(W * 0.85) + rng.randint(-15, 15),
              'height': rng.randint(160, 215), 'color': (225, 155, 120),
              'seed': rng.randint(0, 99999)},
         ]
 
         # 5. Трубчатый (tube) — жёлто-зелёный
         self.coral_tube = [
-            {'x': int(W * 0.23) + rng.randint(-15, 15),
+            {'x': int(W * 0.53) + rng.randint(-15, 15),
              'height': rng.randint(130, 185), 'color': (88, 185, 148),
              'seed': rng.randint(0, 99999)},
         ]
@@ -1115,6 +1173,257 @@ class SeabedDecor:
 
 
 
+# ─── Двустворчатый моллюск ─────────────────────────────────────────
+
+_CS_IDLE_CLOSED   = 'idle_closed'
+_CS_OPENING       = 'opening'
+_CS_IDLE_OPEN     = 'idle_open'
+_CS_CLOSING       = 'closing'
+_CS_HIDING        = 'hiding'
+_CS_HAPPY_OPENING = 'happy_opening'
+_CS_HAPPY         = 'happy'
+_CS_HAPPY_CLOSING = 'happy_closing'
+
+
+class Clam:
+    # Геометрия
+    RX            = 300   # горизонтальный радиус
+    BOT_H         = 85    # высота нижней створки (вниз от шва)
+    TOP_H         = 210   # высота верхней створки (вверх при закрытой)
+    MAX_ANGLE_DEG = 75    # максимальный угол открытия шарнира (градусы)
+    HOVER_R       = 320
+
+    OPEN_IDLE          = 0.42   # idle: ~31 градус → gap ~108px
+    OPEN_HAPPY         = 1.0    # happy: 75 градусов → gap ~203px
+    SPEED_IDLE_OPEN    = 0.38
+    SPEED_IDLE_CLOSE   = 0.52
+    SPEED_HAPPY_OPEN   = 2.20
+    SPEED_HAPPY_CLOSE  = 1.30
+    SPEED_HIDING_CLOSE = 2.80
+    _N = 60
+
+    def __init__(self, cx, sand_y, seed=0):
+        self.cx     = cx
+        self.sand_y = sand_y
+        self.open   = 0.0
+        self._sound = None
+        rng = random.Random(seed)
+        self.state       = _CS_IDLE_CLOSED
+        self.idle_timer  = rng.uniform(3.0, 6.0)
+        self.hold_timer  = 0.0
+        self.happy_timer = 0.0
+        self.wave_phase  = 0.0
+        self.wave_angle  = 0.0
+
+    def _approach(self, target, speed, dt):
+        diff = target - self.open
+        step = speed * dt
+        self.open = target if abs(diff) <= step else self.open + math.copysign(step, diff)
+
+    def update(self, dt, mx, my, events):
+        seam_y = self.sand_y - self.BOT_H
+        near = math.hypot(mx - self.cx, my - seam_y) < self.HOVER_R
+        clicked = any(
+            e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and
+            math.hypot(e.pos[0] - self.cx, e.pos[1] - seam_y) < self.HOVER_R
+            for e in events
+        )
+        if clicked and self.state not in (_CS_HAPPY_OPENING, _CS_HAPPY, _CS_HAPPY_CLOSING):
+            self.state      = _CS_HAPPY_OPENING
+            self.wave_phase = 0.0
+            if self._sound:
+                self._sound.play()
+        elif self.state == _CS_IDLE_CLOSED:
+            if near:
+                self.state = _CS_HIDING
+            else:
+                self.idle_timer -= dt
+                if self.idle_timer <= 0:
+                    self.state = _CS_OPENING
+        elif self.state == _CS_OPENING:
+            if near:
+                self.state = _CS_HIDING
+            else:
+                self._approach(self.OPEN_IDLE, self.SPEED_IDLE_OPEN, dt)
+                if abs(self.open - self.OPEN_IDLE) < 0.008:
+                    self.open       = self.OPEN_IDLE
+                    self.state      = _CS_IDLE_OPEN
+                    self.hold_timer = random.uniform(1.5, 3.0)
+        elif self.state == _CS_IDLE_OPEN:
+            if near:
+                self.state = _CS_HIDING
+            else:
+                self.hold_timer -= dt
+                if self.hold_timer <= 0:
+                    self.state = _CS_CLOSING
+        elif self.state == _CS_CLOSING:
+            if near:
+                self.state = _CS_HIDING
+            else:
+                self._approach(0.0, self.SPEED_IDLE_CLOSE, dt)
+                if self.open < 0.008:
+                    self.open       = 0.0
+                    self.state      = _CS_IDLE_CLOSED
+                    self.idle_timer = random.uniform(4.0, 7.0)
+        elif self.state == _CS_HIDING:
+            self._approach(0.0, self.SPEED_HIDING_CLOSE, dt)
+            if not near:
+                self.state      = _CS_IDLE_CLOSED
+                self.idle_timer = random.uniform(2.0, 4.5)
+        elif self.state == _CS_HAPPY_OPENING:
+            self._approach(self.OPEN_HAPPY, self.SPEED_HAPPY_OPEN, dt)
+            if abs(self.open - self.OPEN_HAPPY) < 0.008:
+                self.open        = self.OPEN_HAPPY
+                self.state       = _CS_HAPPY
+                self.happy_timer = random.uniform(2.5, 3.5)
+        elif self.state == _CS_HAPPY:
+            self.happy_timer -= dt
+            self.wave_phase  += dt * 5.0
+            self.wave_angle   = math.degrees(math.sin(self.wave_phase) * 0.80)
+            if self.happy_timer <= 0:
+                self.state = _CS_HAPPY_CLOSING
+        elif self.state == _CS_HAPPY_CLOSING:
+            self._approach(0.0, self.SPEED_HAPPY_CLOSE, dt)
+            if self.open < 0.008:
+                self.open       = 0.0
+                self.state      = _CS_IDLE_CLOSED
+                self.idle_timer = random.uniform(4.0, 7.0)
+
+    def draw(self, surface):
+        cx    = self.cx
+        seam_y = self.sand_y - self.BOT_H
+        N      = self._N
+
+        # ── Шарнирная механика ──────────────────────────────────────
+        # Верхняя створка вращается вокруг заднего шарнира.
+        # В проекции спереди:
+        #   gap    = TOP_H * sin(angle)  — насколько поднялась передняя кромка
+        #   app_ry = TOP_H * cos(angle)  — видимая высота купола (перспективное сжатие)
+        angle_rad = math.radians(self.open * self.MAX_ANGLE_DEG)
+        gap    = int(self.TOP_H * math.sin(angle_rad))
+        app_ry = max(4, int(self.TOP_H * math.cos(angle_rad)))
+        top_pivot = seam_y - gap   # где видна нижняя кромка верхней створки
+
+        # 1. Тёмная полость (за розовым телом)
+        if gap > 6:
+            cpts = []
+            crx  = self.RX - 8
+            for i in range(N + 1):
+                a = math.pi * i / N
+                cpts.append((int(cx + crx * math.cos(a)),
+                             int(seam_y - gap * math.sin(a))))
+            pygame.draw.polygon(surface, (28, 12, 18, 238), cpts)
+
+        # 2. Розовый моллюск (тело между створками)
+        if gap > 16:
+            brx = max(1, int(self.RX * 0.72))
+            bry = max(1, int(gap * 0.70))
+            bcy = seam_y - gap // 2
+            pygame.draw.ellipse(surface, (210, 80, 76, 245),
+                                pygame.Rect(cx - brx, bcy - bry, brx * 2, bry * 2))
+            hlrx = max(1, int(brx * 0.50))
+            hlry = max(1, int(bry * 0.34))
+            pygame.draw.ellipse(surface, (248, 146, 130, 115),
+                                pygame.Rect(cx - hlrx, bcy - bry + 10, hlrx * 2, hlry * 2))
+
+        # 3. Нижняя створка — статична, купол вниз
+        self._draw_shell_half(surface, cx, seam_y, self.RX, self.BOT_H, +1, N)
+
+        # 4. Верхняя створка — шарнирно поднята, перспективно сжата
+        self._draw_shell_half(surface, cx, top_pivot, self.RX, app_ry, -1, N)
+
+        # 5. Глаза + улыбка — при любом открытии (idle и happy)
+        if gap > 28:
+            self._draw_face(surface, cx, seam_y, gap)
+
+        # 6. Машущая лапка — только в happy
+        if self.state == _CS_HAPPY and self.open > 0.40:
+            self._draw_arm(surface, cx, seam_y, gap)
+
+    def _draw_shell_half(self, surface, cx, pivot_y, rx, ry, sign, N):
+        """sign=+1: купол вниз (нижняя), sign=-1: купол вверх (верхняя)."""
+        col_o = (210, 180, 122)
+        col_i = (240, 210, 162)
+        dark  = (148, 108, 52)
+        lite  = (252, 226, 166)
+        irx, iry = rx - 16, max(4, ry - 16)
+        pi_over_N = math.pi / N
+        pts  = []
+        ipts = []
+        for i in range(N + 1):
+            a   = pi_over_N * i
+            ca  = math.cos(a)
+            sa  = math.sin(a)
+            sy  = sign * sa
+            pts.append((int(cx + rx * ca),
+                        int(pivot_y + ry * sy)))
+            ipts.append((int(cx + irx * ca),
+                         int(pivot_y + iry * sy)))
+        pygame.draw.polygon(surface, (*col_o, 250), pts)
+        pygame.draw.polygon(surface, (*col_i, 215), ipts)
+        rx96 = rx * 0.96
+        ry96 = ry * 0.96
+        for i in range(13):
+            a = math.pi * i / 12
+            pygame.draw.line(surface, (*dark, 78),
+                             (cx, pivot_y),
+                             (int(cx + rx96 * math.cos(a)),
+                              int(pivot_y + sign * ry96 * math.sin(a))), 2)
+        pygame.draw.polygon(surface, (*dark, 195), pts, 3)
+        if ry > 16:
+            rx68 = rx * 0.68
+            ry68 = ry * 0.68
+            blik = []
+            for i in range(14):
+                a = math.pi * (0.11 + 0.78 * i / 13)
+                blik.append((int(cx + rx68 * math.cos(a)),
+                             int(pivot_y + sign * ry68 * math.sin(a))))
+            if len(blik) >= 2:
+                pygame.draw.lines(surface, (*lite, 100), False, blik, 5)
+
+    def _draw_face(self, surface, cx, seam_y, gap):
+        face_y = seam_y - gap // 2
+        eye_r  = min(max(10, int(self.RX * 0.058)), max(1, gap // 2 - 2))
+        eye_dx = int(self.RX * 0.20)
+        for side in (-1, 1):
+            ex, ey = cx + side * eye_dx, face_y - eye_r // 3
+            pygame.draw.circle(surface, (255, 248, 230, 250), (ex, ey), eye_r)
+            pygame.draw.circle(surface, (35, 18, 10, 250), (ex, ey), int(eye_r * 0.62))
+            pygame.draw.circle(surface, (255, 255, 255, 235),
+                               (ex + int(eye_r * 0.30), ey - int(eye_r * 0.32)),
+                               max(2, int(eye_r * 0.28)))
+        # Улыбка — только в happy
+        if self.state in (_CS_HAPPY, _CS_HAPPY_OPENING, _CS_HAPPY_CLOSING):
+            sw = max(1, int(self.RX * 0.30))
+            sh = max(1, int(sw * 0.48))
+            pygame.draw.arc(surface, (185, 52, 52, 240),
+                            pygame.Rect(cx - sw // 2, face_y + 4, sw, sh),
+                            math.pi, math.pi * 2, max(3, int(self.RX * 0.013)))
+
+    def _draw_arm(self, surface, cx, seam_y, gap):
+        bx      = cx + self.RX - 8
+        by      = seam_y - gap // 3
+        arm_len = max(1, int(self.RX * 0.23))
+        flen    = max(1, int(arm_len * 0.55))
+        dir_rad = math.radians(-66 + self.wave_angle)
+        tip_x   = bx + int(math.cos(dir_rad) * arm_len)
+        tip_y   = by + int(math.sin(dir_rad) * arm_len)
+        aw = max(5, int(self.RX * 0.026))
+        kr = max(7, int(self.RX * 0.042))
+        fw = max(3, int(self.RX * 0.018))
+        fr = max(4, int(self.RX * 0.026))
+        col = (215, 162, 98, 238)
+        pygame.draw.line(surface, col, (bx, by), (tip_x, tip_y), aw)
+        pygame.draw.circle(surface, col, (tip_x, tip_y), kr)
+        for i in range(3):
+            fa  = dir_rad + math.radians(-26 + i * 26)
+            fx2 = tip_x + int(math.cos(fa) * flen)
+            fy2 = tip_y + int(math.sin(fa) * flen)
+            pygame.draw.line(surface, col, (tip_x, tip_y), (fx2, fy2), fw)
+            pygame.draw.circle(surface, col, (fx2, fy2), fr)
+
+
+
 # ─── Звуки ─────────────────────────────────────────────────────────
 
 def _make_pop_sound():
@@ -1194,6 +1503,26 @@ def _make_music_wav():
     return wav_io
 
 
+def _make_clam_sound():
+    """Мягкий щелчок раковины при открытии по клику."""
+    try:
+        sr  = 44100
+        n   = int(sr * 0.09)
+        buf = array.array('h')
+        for i in range(n):
+            t   = i / sr
+            env = math.exp(-t * 75)
+            val = (math.sin(2 * math.pi * 180 * t) * 0.38 +
+                   math.sin(2 * math.pi * 420 * t) * 0.18 +
+                   random.uniform(-0.06, 0.06)) * env
+            s   = int(32767 * 0.32 * val)
+            buf.append(s)
+            buf.append(s)
+        return pygame.mixer.Sound(buffer=buf)
+    except Exception:
+        return None
+
+
 # ─── Главное приложение ────────────────────────────────────────────
 
 def hue_to_rgb(hue):
@@ -1218,6 +1547,7 @@ def main():
 
     # ── Звуки и фоновая музыка ──
     pop_sound  = _make_pop_sound()
+    clam_sound = _make_clam_sound()
     try:
         pygame.mixer.music.load(_make_music_wav())
         pygame.mixer.music.set_volume(0.18)
@@ -1231,6 +1561,9 @@ def main():
     background = create_background(W, H)
     seabed     = create_seabed(W, H)
     decor      = SeabedDecor(W, H)
+    sand_y       = H - int(H * SAND_H_FRAC)
+    clams        = [Clam(max(Clam.RX + 20, int(W * 0.24)), sand_y)]
+    clams[0]._sound = clam_sound
 
     for r in range(Bubble.RADIUS_MIN, Bubble.RADIUS_MAX + 1, 4):
         get_bubble_surf(r)
@@ -1248,6 +1581,7 @@ def main():
 
     fizz   = FizzSystem(W, H)
     fishes = FishSystem()
+    paint  = PaintSystem()
 
     chars       = []
     cursor_x    = 20
@@ -1262,7 +1596,8 @@ def main():
         mx, my   = pygame.mouse.get_pos()
 
         # ─── События ───
-        for event in pygame.event.get():
+        raw_events = pygame.event.get()
+        for event in raw_events:
             if event.type == pygame.QUIT:
                 pass
             elif event.type == pygame.KEYDOWN:
@@ -1311,6 +1646,8 @@ def main():
             if b.popping and id(b) not in popping_before:
                 if b.has_fish:
                     fishes.spawn_from_bubble(b.x, b.y, b.radius, b.inner_fish)
+                else:
+                    paint.spawn(b.x, b.y, b.radius)
                 if pop_sound:
                     pop_sound.play()
 
@@ -1327,6 +1664,9 @@ def main():
 
         fizz.update(dt)
         fishes.update(dt)
+        paint.update(dt)
+        for clam in clams:
+            clam.update(dt, mx, my, raw_events)
 
         cutoff = now - TRAIL_LIFETIME
         while trail and trail[0][3] < cutoff:
@@ -1339,7 +1679,10 @@ def main():
 
         dyn_surf.fill((0, 0, 0, 0))
         decor.draw(dyn_surf, now)   # кораллы и водоросли (за пузырями)
+        for clam in clams:
+            clam.draw(dyn_surf)     # моллюски на дне
         fishes.draw(dyn_surf)       # уплывающие рыбки
+        paint.draw(dyn_surf)        # брызги краски
         for b in bubbles:
             b.draw(dyn_surf)
         fizz.draw(dyn_surf)
