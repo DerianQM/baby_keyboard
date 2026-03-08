@@ -433,8 +433,6 @@ class Bubble:
 
     def pop(self):
         self.popping = True
-        if not self.has_fish:
-            return
         n = random.randint(12, 20)
         for _ in range(n):
             angle  = random.uniform(0, math.pi * 2)
