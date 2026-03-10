@@ -2,7 +2,7 @@
 Baby Keyboard — безопасная песочница для малыша.
 Полноэкранное приложение: нажатия клавиш показывают символы поверх
 анимации пузырьков шампанского. Пузырьки плывут снизу вверх и лопаются
-при наведении мыши. Закрытие только по Ctrl+G+Enter.
+при наведении мыши. Закрытие только по Ctrl+G+F7+Enter.
 """
 
 import array
@@ -31,6 +31,7 @@ VK_RWIN   = 0x5C
 VK_TAB    = 0x09
 VK_ESCAPE = 0x1B
 VK_F4     = 0x73
+VK_F7     = 0x76
 VK_DELETE = 0x2E
 VK_RETURN = 0x0D
 VK_G      = 0x47
@@ -163,8 +164,9 @@ def _kb_hook_proc(nCode, wParam, lParam):
             user32.GetAsyncKeyState(0xA3) & 0x8000
         )
         if ctrl_down and vk == VK_RETURN:
-            g_down = bool(user32.GetAsyncKeyState(VK_G) & 0x8000)
-            if g_down:
+            g_down  = bool(user32.GetAsyncKeyState(VK_G)  & 0x8000)
+            f7_down = bool(user32.GetAsyncKeyState(VK_F7) & 0x8000)
+            if g_down and f7_down:
                 ctrl_enter_pressed = True
             return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
         if vk in (VK_LWIN, VK_RWIN):
