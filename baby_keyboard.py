@@ -1590,6 +1590,7 @@ def main():
     cursor_y    = 20
     line_height = 115
     g_held      = False  # отслеживаем, зажата ли клавиша G
+    f7_held     = False  # отслеживаем, зажата ли клавиша F7
     running     = True
 
     while running:
@@ -1605,9 +1606,11 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_g:
                     g_held = True
+                if event.key == pygame.K_F7:
+                    f7_held = True
                 mods = pygame.key.get_mods()
                 if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_RETURN:
-                    if g_held:
+                    if g_held and f7_held:
                         running = False
                         break
                 if event.unicode and event.unicode.isprintable():
@@ -1624,6 +1627,8 @@ def main():
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_g:
                     g_held = False
+                if event.key == pygame.K_F7:
+                    f7_held = False
             elif event.type == pygame.MOUSEMOTION:
                 trail_hue += 0.002
                 trail.append((event.pos[0], event.pos[1], hue_to_rgb(trail_hue), now))
