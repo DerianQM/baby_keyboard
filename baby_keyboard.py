@@ -1222,6 +1222,14 @@ class Clam:
         step = speed * dt
         self.open = target if abs(diff) <= step else self.open + math.copysign(step, diff)
 
+    def trigger_happy(self):
+        """Активировать «счастливое» состояние раковины (например, по нажатию пробела)."""
+        if self.state not in (_CS_HAPPY_OPENING, _CS_HAPPY, _CS_HAPPY_CLOSING):
+            self.state      = _CS_HAPPY_OPENING
+            self.wave_phase = 0.0
+            if self._sound:
+                self._sound.play()
+
     def update(self, dt, mx, my, events):
         seam_y = self.sand_y - self.BOT_H
         near = math.hypot(mx - self.cx, my - seam_y) < self.HOVER_R
@@ -1613,7 +1621,15 @@ def main():
                     if g_held and f7_held:
                         running = False
                         break
-                if event.unicode and event.unicode.isprintable():
+                # Ctrl+G (без F7) — очистить весь набранный текст
+                if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_g and not f7_held:
+                    chars.clear()
+                    cursor_x = 20
+                    cursor_y = 20
+                # Пробел — то же самое, что клик по раковине
+                elif event.key == pygame.K_SPACE:
+                    clam.trigger_happy()
+                elif event.unicode and event.unicode.isprintable():
                     surf = font.render(event.unicode, True, (35, 45, 80))
                     if cursor_x + surf.get_width() > W - 20:
                         cursor_x  = 20
