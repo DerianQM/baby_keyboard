@@ -481,11 +481,11 @@ class FizzSystem:
         self.particles  = []
         self._timer     = 0.0
 
-    def spawn_burst(self, x, n=14):
+    def spawn_burst(self, x, y=None, n=14):
         for _ in range(n):
             self.particles.append(self._make(
                 x=x + random.uniform(-40, 40),
-                y=random.uniform(0, self.ZONE_H),
+                y=random.uniform(0, self.ZONE_H) if y is None else y + random.uniform(-20, 20),
             ))
 
     def _make(self, x=None, y=None):
@@ -1591,14 +1591,11 @@ def main():
 
     fizz   = FizzSystem(W, H)
     fishes = FishSystem()
-    paint  = PaintSystem()
 
     chars       = []
     cursor_x    = 20
     cursor_y    = 20
     line_height = 115
-    g_held      = False  # отслеживаем, зажата ли клавиша G
-    f7_held     = False  # отслеживаем, зажата ли клавиша F7
     running     = True
 
     while running:
@@ -1612,17 +1609,14 @@ def main():
             if event.type == pygame.QUIT:
                 pass
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_g:
-                    g_held = True
-                if event.key == pygame.K_F7:
-                    f7_held = True
                 mods = pygame.key.get_mods()
                 if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_RETURN:
-                    if g_held and f7_held:
+                    keys = pygame.key.get_pressed()
+                    if keys[pygame.K_g] and keys[pygame.K_F7]:
                         running = False
                         break
-                # Ctrl+G (без F7) — очистить весь набранный текст
-                if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_g and not f7_held:
+                # Ctrl+Z — очистить весь набранный текст
+                if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_z:
                     chars.clear()
                     cursor_x = 20
                     cursor_y = 20
@@ -1640,11 +1634,6 @@ def main():
                         cursor_y = 20
                     chars.append((surf, cursor_x, cursor_y))
                     cursor_x += surf.get_width() + 5
-            elif event.type == pygame.KEYUP:
-                if event.key == pygame.K_g:
-                    g_held = False
-                if event.key == pygame.K_F7:
-                    f7_held = False
             elif event.type == pygame.MOUSEMOTION:
                 trail_hue += 0.002
                 trail.append((event.pos[0], event.pos[1], hue_to_rgb(trail_hue), now))
@@ -1670,7 +1659,7 @@ def main():
                 if b.has_fish:
                     fishes.spawn_from_bubble(b.x, b.y, b.radius, b.inner_fish)
                 else:
-                    paint.spawn(b.x, b.y, b.radius)
+                    fizz.spawn_burst(b.x, b.y, n=20)
                 if pop_sound:
                     pop_sound.play()
 
@@ -1687,7 +1676,6 @@ def main():
 
         fizz.update(dt)
         fishes.update(dt)
-        paint.update(dt)
         for clam in clams:
             clam.update(dt, mx, my, raw_events)
 
@@ -1705,7 +1693,6 @@ def main():
         for clam in clams:
             clam.draw(dyn_surf)     # моллюски на дне
         fishes.draw(dyn_surf)       # уплывающие рыбки
-        paint.draw(dyn_surf)        # брызги краски
         for b in bubbles:
             b.draw(dyn_surf)
         fizz.draw(dyn_surf)

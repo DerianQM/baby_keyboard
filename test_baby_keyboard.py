@@ -28,27 +28,32 @@ import baby_keyboard as bk
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 1. КЛЮЧЕВОЕ ТРЕБОВАНИЕ — выход только по Ctrl+G+Enter
+# 1. КЛЮЧЕВОЕ ТРЕБОВАНИЕ — выход только по Ctrl+G+F7+Enter
 # ═══════════════════════════════════════════════════════════════════
 
-class TestCtrlGEnterExit(unittest.TestCase):
-    """Приложение должно закрываться ТОЛЬКО по Ctrl+G+Enter."""
+class TestCtrlGF7EnterExit(unittest.TestCase):
+    """Приложение должно закрываться ТОЛЬКО по Ctrl+G+F7+Enter."""
 
     def _run_events(self):
         """Прокручивает очередь pygame-событий, возвращает running."""
         running = True
         g_held  = False
+        f7_held = False
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_g:
                     g_held = True
+                if event.key == pygame.K_F7:
+                    f7_held = True
                 mods = event.mod
                 if (mods & pygame.KMOD_CTRL) and event.key == pygame.K_RETURN:
-                    if g_held:
+                    if g_held and f7_held:
                         running = False
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_g:
                     g_held = False
+                if event.key == pygame.K_F7:
+                    f7_held = False
         return running
 
     def _post_key(self, key, mod=0, unicode=""):
@@ -63,30 +68,53 @@ class TestCtrlGEnterExit(unittest.TestCase):
             {"key": key, "mod": mod, "unicode": "", "scancode": 0}
         ))
 
-    # ── Ctrl+G+Enter → выход ────────────────────────────────────────
+    # ── Ctrl+G+F7+Enter → выход ─────────────────────────────────────
 
-    def test_ctrl_g_enter_exits(self):
+    def test_ctrl_g_f7_enter_exits(self):
         self._post_key(pygame.K_g, unicode="g")
+        self._post_key(pygame.K_F7)
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
-        self.assertFalse(self._run_events(), "Ctrl+G+Enter должен закрывать приложение")
+        self.assertFalse(self._run_events(), "Ctrl+G+F7+Enter должен закрывать приложение")
 
-    def test_rctrl_g_enter_exits(self):
+    def test_rctrl_g_f7_enter_exits(self):
         self._post_key(pygame.K_g, unicode="g")
+        self._post_key(pygame.K_F7)
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_RCTRL, unicode="\r")
-        self.assertFalse(self._run_events(), "Правый Ctrl+G+Enter должен закрывать")
+        self.assertFalse(self._run_events(), "Правый Ctrl+G+F7+Enter должен закрывать")
 
-    # ── Ctrl+Enter без G не выходит ─────────────────────────────────
+    # ── Неполные комбинации не выходят ──────────────────────────────
 
     def test_ctrl_enter_without_g_does_not_exit(self):
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
-        self.assertTrue(self._run_events(), "Ctrl+Enter без G не должен закрывать")
+        self.assertTrue(self._run_events(), "Ctrl+Enter без G и F7 не должен закрывать")
+
+    def test_ctrl_g_enter_without_f7_does_not_exit(self):
+        """Ctrl+G+Enter без F7 — не выходит."""
+        self._post_key(pygame.K_g, unicode="g")
+        self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
+        self.assertTrue(self._run_events(), "Ctrl+G+Enter без F7 не должен закрывать")
+
+    def test_ctrl_f7_enter_without_g_does_not_exit(self):
+        """Ctrl+F7+Enter без G — не выходит."""
+        self._post_key(pygame.K_F7)
+        self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
+        self.assertTrue(self._run_events(), "Ctrl+F7+Enter без G не должен закрывать")
 
     def test_g_released_before_enter_does_not_exit(self):
         """G отпущена до Enter — не выходит."""
         self._post_key(pygame.K_g, unicode="g")
         self._post_keyup(pygame.K_g)
+        self._post_key(pygame.K_F7)
         self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
         self.assertTrue(self._run_events(), "G отпущена — не должен закрывать")
+
+    def test_f7_released_before_enter_does_not_exit(self):
+        """F7 отпущена до Enter — не выходит."""
+        self._post_key(pygame.K_g, unicode="g")
+        self._post_key(pygame.K_F7)
+        self._post_keyup(pygame.K_F7)
+        self._post_key(pygame.K_RETURN, mod=pygame.KMOD_LCTRL, unicode="\r")
+        self.assertTrue(self._run_events(), "F7 отпущена — не должен закрывать")
 
     # ── Одиночные клавиши не выходят ────────────────────────────────
 
@@ -158,22 +186,34 @@ class TestCtrlGEnterExit(unittest.TestCase):
         blocked = ctrl_down and VK_ESCAPE == 0x1B
         self.assertTrue(blocked, "Ctrl+Esc должен быть заблокирован")
 
-    def test_hook_passes_ctrl_g_enter(self):
-        """Ctrl+G+Enter должен ПРОПУСКАТЬСЯ хуком (return CallNextHookEx)."""
+    def test_hook_passes_ctrl_g_f7_enter(self):
+        """Ctrl+G+F7+Enter должен ПРОПУСКАТЬСЯ хуком (return CallNextHookEx)."""
         VK_RETURN = 0x0D
         VK_G      = 0x47
+        VK_F7     = 0x76
         ctrl_down = True
         g_down    = True
-        passed = ctrl_down and g_down and VK_RETURN == 0x0D
-        self.assertTrue(passed, "Ctrl+G+Enter должен проходить через хук")
+        f7_down   = True
+        passed = ctrl_down and g_down and f7_down and VK_RETURN == 0x0D
+        self.assertTrue(passed, "Ctrl+G+F7+Enter должен проходить через хук")
 
     def test_hook_does_not_set_flag_without_g(self):
         """Хук не должен устанавливать флаг если G не зажата."""
         VK_RETURN = 0x0D
         ctrl_down = True
         g_down    = False
-        would_set = ctrl_down and g_down and VK_RETURN == 0x0D
+        f7_down   = True
+        would_set = ctrl_down and g_down and f7_down and VK_RETURN == 0x0D
         self.assertFalse(would_set, "Без G флаг не должен устанавливаться")
+
+    def test_hook_does_not_set_flag_without_f7(self):
+        """Хук не должен устанавливать флаг если F7 не зажата."""
+        VK_RETURN = 0x0D
+        ctrl_down = True
+        g_down    = True
+        f7_down   = False
+        would_set = ctrl_down and g_down and f7_down and VK_RETURN == 0x0D
+        self.assertFalse(would_set, "Без F7 флаг не должен устанавливаться")
 
 
 # ═══════════════════════════════════════════════════════════════════
